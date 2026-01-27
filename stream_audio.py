@@ -153,7 +153,7 @@ def stream_audio():
         # Check if we need to restart
         if restart_event.is_set():
             restart_event.clear()
-            break
+            continue
 
         # Move to next file
         current_file_index = (current_file_index + 1) % len(mp3_files)
@@ -210,6 +210,7 @@ def play(device_name=None):
         is_paused = False
         pause_event.clear()
         streaming_started = True
+        current_file_index = 0
 
     # Start audio streaming in background thread
     streaming_thread = threading.Thread(target=stream_audio, daemon=True)
