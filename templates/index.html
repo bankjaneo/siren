@@ -314,7 +314,7 @@
             try {
                 const response = await fetch('/config');
                 const config = await response.json();
-                currentVolume = config.default_volume;
+                currentVolume = config.current_volume;
                 document.getElementById('loading-config').style.display = 'none';
                 refreshStatus();
             } catch (error) {
