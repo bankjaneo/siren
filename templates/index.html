@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chromecast Audio Streamer</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .card {
+            background-color: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .card h2 {
+            color: #666;
+            margin-bottom: 15px;
+            font-size: 18px;
+            border-bottom: 2px solid #eee;
+            padding-bottom: 10px;
+        }
+
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+            padding: 10px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+        }
+
+        .status-label {
+            font-weight: bold;
+            color: #555;
+        }
+
+        .status-value {
+            color: #333;
+        }
+
+        .status-value.connected {
+            color: #4CAF50;
+        }
+
+        .status-value.paused {
+            color: #FF9800;
+        }
+
+        .status-value.playing {
+            color: #4CAF50;
+        }
+
+        .control-buttons {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+
+        .play-btn {
+            background-color: #4CAF50;
+            color: white;
+        }
+
+        .play-btn:hover {
+            background-color: #45a049;
+        }
+
+        .pause-btn {
+            background-color: #FF9800;
+            color: white;
+        }
+
+        .pause-btn:hover {
+            background-color: #e68a00;
+        }
+
+        .resume-btn {
+            background-color: #2196F3;
+            color: white;
+        }
+
+        .resume-btn:hover {
+            background-color: #0b7dda;
+        }
+
+        .volume-control {
+            margin-bottom: 20px;
+        }
+
+        .volume-control label {
+            display: block;
+            margin-bottom: 10px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        .volume-control input[type="range"] {
+            width: 100%;
+            max-width: 400px;
+        }
+
+        .volume-display {
+            text-align: right;
+            margin-top: 5px;
+            color: #666;
+        }
+
+        .file-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .file-item {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .device-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 10px;
+        }
+
+        .device-item {
+            padding: 15px;
+            background-color: #f9f9f9;
+            border-radius: 4px;
+            text-align: center;
+        }
+
+        .connect-btn {
+            margin-top: 10px;
+            padding: 8px 16px;
+            font-size: 14px;
+            background-color: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        .connect-btn:hover {
+            background-color: #0b7dda;
+        }
+
+        .connect-btn.connected {
+            background-color: #4CAF50;
+        }
+
+        .connect-btn.connected:hover {
+            background-color: #45a049;
+        }
+
+        .refresh-btn {
+            background-color: #607D8B;
+            color: white;
+            margin-bottom: 20px;
+        }
+
+        .refresh-btn:hover {
+            background-color: #546E7A;
+        }
+
+        .error-message {
+            color: #f44336;
+            background-color: #ffebee;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            display: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <h1>🎵 Chromecast Audio Streamer</h1>
+
+    <button class="refresh-btn" onclick="refreshStatus()">🔄 Refresh Status</button>
+
+    <div id="loading-config" class="loading">Loading configuration...</div>
+
+    <div class="card">
+        <h2>Current Status</h2>
+        <div class="status-row">
+            <span class="status-label">Device:</span>
+            <span class="status-value" id="device-name">Not connected</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Status:</span>
+            <span class="status-value" id="play-status">-</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Volume:</span>
+            <span class="status-value" id="volume-level">-</span>
+        </div>
+        <div class="status-row">
+            <span class="status-label">Files:</span>
+            <span class="status-value" id="files-count">-</span>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Controls</h2>
+        <div class="control-buttons">
+            <button class="play-btn" onclick="playAudio()">▶ Play</button>
+            <button class="pause-btn" onclick="pauseAudio()">⏸ Pause</button>
+            <button class="resume-btn" onclick="resumeAudio()">▶▶ Resume</button>
+        </div>
+
+        <div class="volume-control">
+            <label for="volume-slider">Volume: <span id="volume-value">5</span>%</label>
+            <input type="range" id="volume-slider" min="1" max="100" value="5" oninput="setVolume(this.value)">
+            <div class="volume-display">Current: <span id="volume-display">5</span>%</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Available Devices</h2>
+        <div class="device-list" id="device-list">
+            <div class="loading">Loading devices...</div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Music Files</h2>
+        <div class="file-list" id="file-list">
+            <div class="loading">Loading files...</div>
+        </div>
+    </div>
+
+    <div class="error-message" id="error-message"></div>
+
+    <script>
+        let currentVolume = 5;
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error-message');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            setTimeout(() => {
+                errorDiv.style.display = 'none';
+            }, 5000);
+        }
+
+        async function loadConfig() {
+            try {
+                const response = await fetch('/config');
+                const config = await response.json();
+                currentVolume = config.default_volume;
+                document.getElementById('loading-config').style.display = 'none';
+                refreshStatus();
+            } catch (error) {
+                showError('Failed to load config: ' + error.message);
+                document.getElementById('loading-config').style.display = 'none';
+            }
+        }
+
+        async function refreshStatus() {
+            try {
+                const statusResponse = await fetch('/status');
+                const status = await statusResponse.json();
+
+                document.getElementById('device-name').textContent = status.selected_device || 'Not connected';
+                document.getElementById('device-name').className = 'status-value' + (status.selected_device ? ' connected' : '');
+
+                const playStatus = status.is_paused ? 'Paused' : 'Playing';
+                const playStatusElement = document.getElementById('play-status');
+                playStatusElement.textContent = playStatus;
+                playStatusElement.className = 'status-value ' + (status.is_paused ? 'paused' : 'playing');
+
+                document.getElementById('volume-level').textContent = currentVolume + '%';
+                document.getElementById('files-count').textContent = status.files_count;
+
+                // Update volume slider
+                document.getElementById('volume-slider').value = currentVolume;
+                document.getElementById('volume-value').textContent = currentVolume;
+                document.getElementById('volume-display').textContent = currentVolume;
+
+            } catch (error) {
+                showError('Failed to load status: ' + error.message);
+            }
+        }
+
+        async function playAudio() {
+            try {
+                const response = await fetch('/play');
+                const result = await response.json();
+
+                if (result.status === 'playing') {
+                    refreshStatus();
+                } else {
+                    showError(result.message || 'Failed to play');
+                }
+            } catch (error) {
+                showError('Failed to play: ' + error.message);
+            }
+        }
+
+        async function pauseAudio() {
+            try {
+                const response = await fetch('/pause');
+                const result = await response.json();
+
+                if (result.status === 'paused') {
+                    refreshStatus();
+                }
+            } catch (error) {
+                showError('Failed to pause: ' + error.message);
+            }
+        }
+
+        async function resumeAudio() {
+            try {
+                const response = await fetch('/resume');
+                const result = await response.json();
+
+                if (result.status === 'resumed') {
+                    refreshStatus();
+                }
+            } catch (error) {
+                showError('Failed to resume: ' + error.message);
+            }
+        }
+
+        async function setVolume(value) {
+            currentVolume = value;
+            document.getElementById('volume-value').textContent = value;
+            document.getElementById('volume-display').textContent = value;
+
+            try {
+                const response = await fetch(`/volume/${value}`);
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    refreshStatus();
+                } else {
+                    showError(result.message || 'Failed to set volume');
+                }
+            } catch (error) {
+                showError('Failed to set volume: ' + error.message);
+            }
+        }
+
+        async function loadDevices() {
+            try {
+                const response = await fetch('/devices');
+                const result = await response.json();
+
+                const deviceList = document.getElementById('device-list');
+
+                if (result.devices && result.devices.length > 0) {
+                    deviceList.innerHTML = '';
+
+                    result.devices.forEach(device => {
+                        const deviceDiv = document.createElement('div');
+                        deviceDiv.className = 'device-item';
+
+                        const deviceName = document.createElement('div');
+                        deviceName.textContent = device.name;
+                        deviceName.style.fontWeight = 'bold';
+
+                        const deviceModel = document.createElement('div');
+                        deviceModel.textContent = device.model;
+                        deviceModel.style.fontSize = '12px';
+                        deviceModel.style.color = '#666';
+                        deviceModel.style.marginTop = '5px';
+
+                        const connectBtn = document.createElement('button');
+                        connectBtn.className = 'connect-btn';
+                        connectBtn.textContent = 'Connect';
+                        connectBtn.onclick = () => connectToDevice(device.name);
+
+                        deviceDiv.appendChild(deviceName);
+                        deviceDiv.appendChild(deviceModel);
+                        deviceDiv.appendChild(connectBtn);
+                        deviceList.appendChild(deviceDiv);
+                    });
+                } else {
+                    deviceList.innerHTML = '<div class="loading">No devices found</div>';
+                }
+            } catch (error) {
+                showError('Failed to load devices: ' + error.message);
+            }
+        }
+
+        async function connectToDevice(deviceName) {
+            try {
+                const response = await fetch(`/connect/${encodeURIComponent(deviceName)}`);
+                const result = await response.json();
+
+                if (result.status === 'connected') {
+                    currentVolume = result.volume;
+                    refreshStatus();
+                    loadDevices();
+                } else {
+                    showError(result.message || 'Failed to connect');
+                }
+            } catch (error) {
+                showError('Failed to connect: ' + error.message);
+            }
+        }
+
+        async function loadFiles() {
+            try {
+                const response = await fetch('/files');
+                const filesData = await response.json();
+
+                const fileList = document.getElementById('file-list');
+
+                if (filesData.files && filesData.files.length > 0) {
+                    fileList.innerHTML = '';
+
+                    filesData.files.forEach((file, index) => {
+                        const fileDiv = document.createElement('div');
+                        fileDiv.className = 'file-item';
+                        const fileName = file.replace('music/', '');
+                        fileDiv.textContent = `${index + 1}: ${fileName}`;
+                        fileList.appendChild(fileDiv);
+                    });
+                } else {
+                    fileList.innerHTML = '<div class="loading">No files found</div>';
+                }
+            } catch (error) {
+                showError('Failed to load files: ' + error.message);
+            }
+        }
+
+        // Initial load
+        loadConfig();
+        loadDevices();
+        loadFiles();
+
+        // Auto-refresh status every 5 seconds
+        setInterval(refreshStatus, 5000);
+    </script>
+</body>
+</html>

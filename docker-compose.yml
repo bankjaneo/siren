@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  siren-stream:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: siren-stream
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./music:/app/music
+    restart: unless-stopped
+    environment:
+      - FLASK_ENV=development
+    command: python stream_audio.py
