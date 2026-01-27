@@ -141,6 +141,9 @@ def stream_audio():
                 while True:
                     if pause_event.is_set():
                         break
+                    if restart_event.is_set():
+                        restart_event.clear()
+                        break
 
                     data = f.read(4096)
                     if not data:
@@ -194,7 +197,7 @@ def favicon():
 @app.route("/play/<device_name>")
 def play(device_name=None):
     """Start the audio stream"""
-    global is_paused, chromecast, media_controller
+    global is_paused, chromecast, media_controller, current_file_index
 
     # Check for music files first
     mp3_files = get_mp3_files()
@@ -211,6 +214,14 @@ def play(device_name=None):
         pause_event.clear()
         streaming_started = True
         current_file_index = 0
+        restart_event.clear()
+
+    # Stop current playback
+    if media_controller and chromecast:
+        try:
+            media_controller.stop()
+        except Exception:
+            pass
 
     # Start audio streaming in background thread
     streaming_thread = threading.Thread(target=stream_audio, daemon=True)
@@ -364,24 +375,80 @@ def files():
 @app.route("/previous")
 def previous():
     """Play previous file in the playlist"""
-    global current_file_index
+    global current_file_index, is_paused
     mp3_files = get_mp3_files()
     if not mp3_files:
         return {"status": "failed", "message": "No MP3 files found"}
-    current_file_index = (current_file_index - 1) % len(mp3_files)
-    restart_event.set()
+    current_file_index = (current_file_index - 1 + len(mp3_files)) % len(mp3_files)
+    with lock:
+        is_paused = False
+        pause_event.clear()
+        restart_event.set()
+
+    if media_controller and chromecast:
+        try:
+            media_controller.stop()
+            import socket
+
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except:
+                pass
+            stream_url = f"http://{local_ip}:{PORT}/stream"
+            media_controller.play_media(
+                stream_url,
+                "audio/mpeg",
+                stream_type="BUFFERED",
+                autoplay=True,
+                title="Stream",
+            )
+        except Exception:
+            pass
     return {"status": "success", "file_index": current_file_index}
 
 
 @app.route("/next")
 def next():
     """Play next file in the playlist"""
-    global current_file_index
+    global current_file_index, is_paused
     mp3_files = get_mp3_files()
     if not mp3_files:
         return {"status": "failed", "message": "No MP3 files found"}
     current_file_index = (current_file_index + 1) % len(mp3_files)
-    restart_event.set()
+    with lock:
+        is_paused = False
+        pause_event.clear()
+        restart_event.set()
+
+    if media_controller and chromecast:
+        try:
+            media_controller.stop()
+            import socket
+
+            hostname = socket.gethostname()
+            local_ip = socket.gethostbyname(hostname)
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                s.connect(("8.8.8.8", 80))
+                local_ip = s.getsockname()[0]
+                s.close()
+            except:
+                pass
+            stream_url = f"http://{local_ip}:{PORT}/stream"
+            media_controller.play_media(
+                stream_url,
+                "audio/mpeg",
+                stream_type="BUFFERED",
+                autoplay=True,
+                title="Stream",
+            )
+        except Exception:
+            pass
     return {"status": "success", "file_index": current_file_index}
 
 
