@@ -30,6 +30,7 @@ current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
 current_file_index = 0
 mp3_files = []
+streaming_started = False
 
 
 def get_mp3_files():
@@ -208,6 +209,11 @@ def play(device_name=None):
     with lock:
         is_paused = False
         pause_event.clear()
+        streaming_started = True
+
+    # Start audio streaming in background thread
+    streaming_thread = threading.Thread(target=stream_audio, daemon=True)
+    streaming_thread.start()
 
     # Start playback on Chromecast
     if media_controller and chromecast:
@@ -228,7 +234,7 @@ def play(device_name=None):
                 pass
 
             # Use the actual IP address instead of localhost
-            stream_url = f"http://{local_ip}:5000/stream"
+            stream_url = f"http://{local_ip}:{PORT}/stream"
 
             # Try with stream_type parameter
             media_controller.play_media(
@@ -282,16 +288,47 @@ def pause():
 @app.route("/resume")
 def resume():
     """Resume the audio stream"""
-    global is_paused
+    global is_paused, streaming_started
 
     with lock:
         is_paused = False
         pause_event.clear()
 
-    # Also resume the media player on Chromecast
+    # If streaming hasn't started yet, treat as /play
+    if not streaming_started:
+        streaming_started = True
+        streaming_thread = threading.Thread(target=stream_audio, daemon=True)
+        streaming_thread.start()
+
+    # Resume the media player on Chromecast
     if media_controller and chromecast:
         try:
-            media_controller.play()
+            status = media_controller.status
+            if status and status.player_state != "PLAYING":
+                # Check if there's an active session
+                if status.player_state == "IDLE" or status.player_state == "UNKNOWN":
+                    # No active session, need to start playback
+                    import socket
+
+                    hostname = socket.gethostname()
+                    local_ip = socket.gethostbyname(hostname)
+                    try:
+                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                        s.connect(("8.8.8.8", 80))
+                        local_ip = s.getsockname()[0]
+                        s.close()
+                    except:
+                        pass
+                    stream_url = f"http://{local_ip}:{PORT}/stream"
+                    media_controller.play_media(
+                        stream_url,
+                        "audio/mpeg",
+                        stream_type="BUFFERED",
+                        autoplay=True,
+                        title="Stream",
+                    )
+                else:
+                    media_controller.play()
         except Exception:
             pass
 
