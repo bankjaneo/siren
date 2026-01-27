@@ -27,7 +27,7 @@ RUN useradd -m -u 1000 appuser && \
 USER appuser
 
 # Expose port
-EXPOSE 5000
+EXPOSE 5067
 
 # Run the application
 CMD ["python", "stream_audio.py"]

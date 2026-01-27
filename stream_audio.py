@@ -3,7 +3,7 @@ import os
 import time
 import threading
 import logging
-from flask import Flask, Response, request, render_template
+from flask import Flask, Response, request, render_template, send_from_directory
 from flask_cors import CORS
 from pychromecast import get_chromecasts
 from pychromecast.controllers.media import MediaController
@@ -17,16 +17,19 @@ CORS(app)
 
 MUSIC_FOLDER = "music/"
 DEFAULT_DEVICE = "Google Nest Mini"
-PORT = 5000
+PORT = 5067
 LOOP_DELAY = 0.1
 DEFAULT_VOLUME = 5
 is_paused = True
 pause_event = threading.Event()
+restart_event = threading.Event()
 chromecast = None
 media_controller = None
 selected_device = None
 current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
+current_file_index = 0
+mp3_files = []
 
 
 def get_mp3_files():
@@ -114,7 +117,7 @@ def set_volume(volume_percent, retries=5, delay=1):
 
 def stream_audio():
     """Stream MP3 files from music folder to Chromecast"""
-    global is_paused, chromecast, media_controller
+    global is_paused, chromecast, media_controller, current_file_index
 
     mp3_files = get_mp3_files()
 
@@ -125,7 +128,6 @@ def stream_audio():
         if not find_chromecast():
             return
 
-    current_file_index = 0
     while True:
         if pause_event.is_set():
             while pause_event.is_set():
@@ -146,6 +148,11 @@ def stream_audio():
                     yield data
         except Exception:
             pass
+
+        # Check if we need to restart
+        if restart_event.is_set():
+            restart_event.clear()
+            break
 
         # Move to next file
         current_file_index = (current_file_index + 1) % len(mp3_files)
@@ -174,6 +181,12 @@ def stream_audio_endpoint():
 def index():
     """Serve the web UI"""
     return render_template("index.html")
+
+
+@app.route("/favicon.ico")
+def favicon():
+    """Serve the favicon"""
+    return send_from_directory("", "favicon.png")
 
 
 @app.route("/play")
@@ -288,22 +301,50 @@ def resume():
 @app.route("/status")
 def status():
     """Get current status"""
+    global current_file_index
     mp3_files = get_mp3_files()
     return {
         "is_paused": is_paused,
         "files_count": len(mp3_files),
         "chromecast_connected": chromecast is not None,
         "selected_device": chromecast.cast_info.friendly_name if chromecast else None,
+        "current_file_index": current_file_index,
+        "current_file": mp3_files[current_file_index] if mp3_files else None,
     }
 
 
 @app.route("/files")
 def files():
     """Get list of MP3 files"""
+    global current_file_index
     mp3_files = get_mp3_files()
     # Strip the MUSIC_FOLDER prefix from file paths
     files = [f.replace(MUSIC_FOLDER, "") for f in mp3_files]
-    return {"files": files}
+    return {"files": files, "current_file_index": current_file_index}
+
+
+@app.route("/previous")
+def previous():
+    """Play previous file in the playlist"""
+    global current_file_index
+    mp3_files = get_mp3_files()
+    if not mp3_files:
+        return {"status": "failed", "message": "No MP3 files found"}
+    current_file_index = (current_file_index - 1) % len(mp3_files)
+    restart_event.set()
+    return {"status": "success", "file_index": current_file_index}
+
+
+@app.route("/next")
+def next():
+    """Play next file in the playlist"""
+    global current_file_index
+    mp3_files = get_mp3_files()
+    if not mp3_files:
+        return {"status": "failed", "message": "No MP3 files found"}
+    current_file_index = (current_file_index + 1) % len(mp3_files)
+    restart_event.set()
+    return {"status": "success", "file_index": current_file_index}
 
 
 @app.route("/connect")
@@ -370,7 +411,7 @@ def config():
 if __name__ == "__main__":
     print("Starting Google Cast Audio Streamer...")
     print(f"Place your MP3 files in '{MUSIC_FOLDER}' folder")
-    print("Access the stream at: http://localhost:5000")
+    print(f"Access the stream at: http://localhost:{PORT}")
     print("\nAvailable endpoints:")
     print("  / - Main audio stream")
     print("  /play - Start playback")
@@ -378,6 +419,8 @@ if __name__ == "__main__":
     print("  /pause - Pause playback")
     print("  /resume - Resume playback")
     print("  /status - Get current status")
+    print("  /previous - Play previous file")
+    print("  /next - Play next file")
     print("  /connect - Connect to Chromecast device")
     print("  /connect/:device_name - Connect to specific device")
     print("  /devices - List available Chromecast devices")

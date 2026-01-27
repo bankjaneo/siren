@@ -50,7 +50,9 @@ Navigate to `http://localhost:5000` in your browser for the web UI.
 - **Play with device**: `curl http://localhost:5000/play/Bedroom%20speaker` - Start streaming to specific device
 - **Pause**: `curl http://localhost:5000/pause` - Stop streaming
 - **Resume**: `curl http://localhost:5000/resume` - Continue streaming
-- **Status**: `curl http://localhost:5000/status` - Check current state
+- **Status**: `curl http://localhost:5000/status` - Check current state (includes current file index and file)
+- **Previous**: `curl http://localhost:5000/previous` - Play previous file in playlist
+- **Next**: `curl http://localhost:5000/next` - Play next file in playlist
 - **Connect**: `curl http://localhost:5000/connect` - Connect to Google Nest Mini
 - **Connect with device**: `curl http://localhost:5000/connect/Bedroom%20speaker` - Connect to specific device
 - **Devices**: `curl http://localhost:5000/devices` - List available Chromecast devices
