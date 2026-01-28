@@ -6,14 +6,20 @@ A Python service that continuously streams MP3 files from a folder to your Chrom
 
 ### Local Development
 
-1. Install dependencies:
+1. Create and activate virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate
+```
+
+2. Install dependencies:
 ```bash
 pip install -r requirements.txt
 ```
 
-2. Place your MP3 files in the `music/` folder
+3. Place your MP3 files in the `music/` folder
 
-3. Start the server:
+4. Start the server:
 ```bash
 chmod +x start.sh
 ./start.sh

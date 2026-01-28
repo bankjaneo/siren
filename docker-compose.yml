@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   siren-stream:
     build:
@@ -13,3 +11,8 @@ services:
     environment:
       - FLASK_ENV=development
     command: python stream_audio.py
+    logging:
+      driver: "json-file"
+      options:
+        max-file: "1"
+        max-size: "10m"
