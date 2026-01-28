@@ -18,7 +18,7 @@ app = Flask(__name__)
 CORS(app)
 
 MUSIC_FOLDER = "music/"
-DEFAULT_DEVICE = "Google Nest Mini"
+DEFAULT_DEVICE = "Bedroom speaker"
 PORT = 5067
 LOOP_DELAY = 0.1
 DEFAULT_VOLUME = 5
