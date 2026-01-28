@@ -113,27 +113,20 @@ Edit these values in `stream_audio.py` before starting the server.
 
 If you see `[Errno 105] No buffer space available` when discovering devices, the Linux kernel's network buffer limits are too low for mDNS multicast discovery.
 
-**Solution 1: Use docker-compose (recommended)**
+**Fix: Increase host system limits**
 
-The docker-compose.yml includes sysctl settings that increase buffer limits:
+Since the container uses `network_mode: host`, kernel network settings must be configured on the host system.
+
+**Temporary (until reboot):**
 ```bash
-docker-compose up --build
+sudo sysctl -w net.core.rmem_max=2097152
+sudo sysctl -w net.core.wmem_max=2097152
+sudo sysctl -w net.ipv4.igmp_max_memberships=256
 ```
 
-**Solution 2: Manual docker run with sysctl**
+**Persistent (survives reboot):**
 
-```bash
-docker run --network=host \
-  --sysctl net.core.rmem_max=2097152 \
-  --sysctl net.core.wmem_max=2097152 \
-  --sysctl net.ipv4.igmp_max_memberships=256 \
-  -v $(pwd)/music:/app/music \
-  siren-stream
-```
-
-**Solution 3: Increase host system limits (persistent)**
-
-Add to `/etc/sysctl.conf` on the Docker host:
+Add to `/etc/sysctl.conf` or create `/etc/sysctl.d/chromecast.conf`:
 ```
 net.core.rmem_max=2097152
 net.core.wmem_max=2097152
@@ -141,3 +134,8 @@ net.ipv4.igmp_max_memberships=256
 ```
 
 Then apply: `sudo sysctl -p`
+
+After setting these values, restart the container:
+```bash
+docker-compose restart
+```
