@@ -20,6 +20,7 @@ DEFAULT_DEVICE = "Google Nest Mini"
 PORT = 5067
 LOOP_DELAY = 0.1
 DEFAULT_VOLUME = 5
+
 is_paused = True
 pause_event = threading.Event()
 restart_event = threading.Event()
