@@ -6,8 +6,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: siren-stream
-    ports:
-      - "5067:5067"
+    network_mode: host
     volumes:
       - ./music:/app/music
     restart: unless-stopped

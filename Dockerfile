@@ -19,15 +19,8 @@ COPY stream_audio.py .
 COPY templates/ templates/
 COPY music/ music/
 
-# Create non-root user
-RUN useradd -m -u 1000 appuser && \
-    chown -R appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
-
 # Expose port
 EXPOSE 5067
 
-# Run the application
+# Run the application as root (required for host networking)
 CMD ["python", "stream_audio.py"]
