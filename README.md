@@ -34,7 +34,7 @@ docker build -t siren-stream .
 
 2. Run with bind mount for music folder:
 ```bash
-docker run -p 5000:5000 -v $(pwd)/music:/app/music siren-stream
+docker run --network=host -v $(pwd)/music:/app/music siren-stream
 ```
 
 3. Or use docker-compose:
