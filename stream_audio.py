@@ -10,7 +10,7 @@ from pychromecast.controllers.media import MediaController
 import threading
 
 # Suppress Flask development server warning
-logging.getLogger("werkzeug").setLevel(logging.WARNING)
+logging.getLogger("werkzeug").setLevel(logging.INFO)
 
 app = Flask(__name__)
 CORS(app)
@@ -513,12 +513,27 @@ def config():
     }
 
 
+def get_lan_ip():
+    """Get the LAN IP address of the machine"""
+    import socket
+
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+        return lan_ip
+    except:
+        return "localhost"
+
+
 if __name__ == "__main__":
     print("Starting Google Cast Audio Streamer...")
     print(f"Place your MP3 files in '{MUSIC_FOLDER}' folder")
-    print(f"Access the stream at: http://localhost:{PORT}")
+    lan_ip = get_lan_ip()
+    print(f"Access the web interface at: http://{lan_ip}:{PORT}")
     print("\nAvailable endpoints:")
-    print("  / - Main audio stream")
+    print("  / - Web interface")
     print("  /play - Start playback")
     print("  /play/:device_name - Start playback on specific device")
     print("  /pause - Pause playback")
