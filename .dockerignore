@@ -11,3 +11,7 @@ build/
 .git/
 .gitignore
 .ruff_cache/
+*.md
+*.sh
+music/
+docker-compose.yml

@@ -1,26 +1,20 @@
-FROM python:3.11-slim
+FROM python:3.11-alpine
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# Install build dependencies, Python packages, then clean up
+RUN apk add --no-cache --virtual .build-deps gcc musl-dev \
+    && pip install --no-cache-dir flask==3.0.0 flask-cors==4.0.0 pychromecast==14.0.9 zeroconf==0.135.0 \
+    && apk del .build-deps
 
-# Copy requirements file
-COPY requirements.txt .
-
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application files
+# Copy application files (music folder is mounted as volume)
 COPY stream_audio.py .
+COPY favicon.png .
 COPY templates/ templates/
-COPY music/ music/
 
-# Expose port
+# Create empty music directory for volume mount
+RUN mkdir -p music
+
 EXPOSE 5067
 
-# Run the application as root (required for host networking)
 CMD ["python", "stream_audio.py"]
