@@ -3,10 +3,12 @@ import os
 import time
 import threading
 import logging
+import socket
 from flask import Flask, Response, request, render_template, send_from_directory
 from flask_cors import CORS
 from pychromecast import get_chromecasts
 from pychromecast.controllers.media import MediaController
+from zeroconf import Zeroconf, InterfaceChoice
 import threading
 
 # Suppress Flask development server warning
@@ -34,6 +36,18 @@ mp3_files = []
 streaming_started = False
 
 
+def get_lan_ip():
+    """Get the LAN IP address of the machine"""
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        s.connect(("8.8.8.8", 80))
+        lan_ip = s.getsockname()[0]
+        s.close()
+        return lan_ip
+    except Exception:
+        return "localhost"
+
+
 def get_mp3_files():
     """Get all MP3 files from the music folder"""
     if not os.path.exists(MUSIC_FOLDER):
@@ -47,13 +61,31 @@ def get_mp3_files():
     return sorted(mp3_files)
 
 
+def create_zeroconf():
+    """Create a Zeroconf instance with interface binding to avoid buffer issues"""
+    try:
+        # Try to use all interfaces first
+        return Zeroconf(interfaces=InterfaceChoice.All)
+    except OSError:
+        # Fall back to default interface only
+        try:
+            return Zeroconf(interfaces=InterfaceChoice.Default)
+        except OSError:
+            # Last resort: bind to the main network interface IP only
+            lan_ip = get_lan_ip()
+            if lan_ip != "localhost":
+                return Zeroconf(interfaces=[lan_ip])
+            raise
+
+
 def find_chromecast(device_name=None):
     """Find and connect to Chromecast device"""
     global chromecast, media_controller
 
     zconf = None
     try:
-        chromecasts, zconf = get_chromecasts()
+        zconf = create_zeroconf()
+        chromecasts, browser = get_chromecasts(zeroconf_instance=zconf)
 
         if not chromecasts:
             return False
@@ -87,9 +119,12 @@ def find_chromecast(device_name=None):
         set_volume(current_volume)
 
         return True
+    except OSError as e:
+        app.logger.error(f"Error during Chromecast discovery: {e}")
+        return False
     finally:
         if zconf:
-            zconf.stop_discovery()
+            zconf.close()
 
 
 def set_volume(volume_percent, retries=5, delay=1):
@@ -233,22 +268,7 @@ def play(device_name=None):
     # Start playback on Chromecast
     if media_controller and chromecast:
         try:
-            # Get the server's IP address
-            import socket
-
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-
-            # Try to get the actual network IP (not localhost)
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except:
-                pass
-
-            # Use the actual IP address instead of localhost
+            local_ip = get_lan_ip()
             stream_url = f"http://{local_ip}:{PORT}/stream"
 
             # Try with stream_type parameter
@@ -323,17 +343,7 @@ def resume():
                 # Check if there's an active session
                 if status.player_state == "IDLE" or status.player_state == "UNKNOWN":
                     # No active session, need to start playback
-                    import socket
-
-                    hostname = socket.gethostname()
-                    local_ip = socket.gethostbyname(hostname)
-                    try:
-                        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        s.connect(("8.8.8.8", 80))
-                        local_ip = s.getsockname()[0]
-                        s.close()
-                    except:
-                        pass
+                    local_ip = get_lan_ip()
                     stream_url = f"http://{local_ip}:{PORT}/stream"
                     media_controller.play_media(
                         stream_url,
@@ -391,17 +401,7 @@ def previous():
     if media_controller and chromecast:
         try:
             media_controller.stop()
-            import socket
-
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except:
-                pass
+            local_ip = get_lan_ip()
             stream_url = f"http://{local_ip}:{PORT}/stream"
             media_controller.play_media(
                 stream_url,
@@ -431,17 +431,7 @@ def next():
     if media_controller and chromecast:
         try:
             media_controller.stop()
-            import socket
-
-            hostname = socket.gethostname()
-            local_ip = socket.gethostbyname(hostname)
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                s.connect(("8.8.8.8", 80))
-                local_ip = s.getsockname()[0]
-                s.close()
-            except:
-                pass
+            local_ip = get_lan_ip()
             stream_url = f"http://{local_ip}:{PORT}/stream"
             media_controller.play_media(
                 stream_url,
@@ -474,7 +464,8 @@ def devices():
     """List available Chromecast devices"""
     zconf = None
     try:
-        chromecasts, zconf = get_chromecasts()
+        zconf = create_zeroconf()
+        chromecasts, browser = get_chromecasts(zeroconf_instance=zconf)
         devices_list = []
         for cc in chromecasts:
             devices_list.append(
@@ -494,7 +485,7 @@ def devices():
         }
     finally:
         if zconf:
-            zconf.stop_discovery()
+            zconf.close()
 
 
 @app.route("/volume/<int:value>")
@@ -525,20 +516,6 @@ def config():
         "default_volume": DEFAULT_VOLUME,
         "current_volume": current_volume,
     }
-
-
-def get_lan_ip():
-    """Get the LAN IP address of the machine"""
-    import socket
-
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(("8.8.8.8", 80))
-        lan_ip = s.getsockname()[0]
-        s.close()
-        return lan_ip
-    except:
-        return "localhost"
 
 
 if __name__ == "__main__":

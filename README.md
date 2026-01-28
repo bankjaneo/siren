@@ -106,3 +106,38 @@ Edit these values in `stream_audio.py` before starting the server.
 - Volume is set automatically when connecting to a device
 - Default volume is 5 (5%)
 - The stream URL is automatically detected from the server's IP address
+
+## Troubleshooting
+
+### Chromecast Discovery Issues in Docker
+
+If you see `[Errno 105] No buffer space available` when discovering devices, the Linux kernel's network buffer limits are too low for mDNS multicast discovery.
+
+**Solution 1: Use docker-compose (recommended)**
+
+The docker-compose.yml includes sysctl settings that increase buffer limits:
+```bash
+docker-compose up --build
+```
+
+**Solution 2: Manual docker run with sysctl**
+
+```bash
+docker run --network=host \
+  --sysctl net.core.rmem_max=2097152 \
+  --sysctl net.core.wmem_max=2097152 \
+  --sysctl net.ipv4.igmp_max_memberships=256 \
+  -v $(pwd)/music:/app/music \
+  siren-stream
+```
+
+**Solution 3: Increase host system limits (persistent)**
+
+Add to `/etc/sysctl.conf` on the Docker host:
+```
+net.core.rmem_max=2097152
+net.core.wmem_max=2097152
+net.ipv4.igmp_max_memberships=256
+```
+
+Then apply: `sudo sysctl -p`
