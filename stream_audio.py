@@ -51,43 +51,45 @@ def find_chromecast(device_name=None):
     """Find and connect to Chromecast device"""
     global chromecast, media_controller
 
-    chromecasts = get_chromecasts()
+    zconf = None
+    try:
+        chromecasts, zconf = get_chromecasts()
 
-    if not chromecasts:
-        return False
+        if not chromecasts:
+            return False
 
-    # get_chromecasts returns a tuple, first element is a list
-    devices_list = chromecasts[0]
+        # Find specific device if name provided
+        if device_name:
+            for cc in chromecasts:
+                if device_name in cc.cast_info.friendly_name:
+                    chromecast = cc
+                    break
+        else:
+            # Try to find default device specifically
+            for cc in chromecasts:
+                if DEFAULT_DEVICE in cc.cast_info.friendly_name:
+                    chromecast = cc
+                    break
 
-    # Find specific device if name provided
-    if device_name:
-        for cc in devices_list:
-            if device_name in cc.cast_info.friendly_name:
-                chromecast = cc
-                break
-    else:
-        # Try to find default device specifically
-        for cc in devices_list:
-            if DEFAULT_DEVICE in cc.cast_info.friendly_name:
-                chromecast = cc
-                break
+        if not chromecast:
+            return False
 
-    if not chromecast:
-        return False
+        # Connect to the device
+        chromecast.start()
 
-    # Connect to the device
-    chromecast.start()
+        # Wait for connection to be ready
+        time.sleep(2)
 
-    # Wait for connection to be ready
-    time.sleep(2)
+        # Use the built-in media controller
+        media_controller = chromecast.media_controller
 
-    # Use the built-in media controller
-    media_controller = chromecast.media_controller
+        # Set volume with retry
+        set_volume(current_volume)
 
-    # Set volume with retry
-    set_volume(current_volume)
-
-    return True
+        return True
+    finally:
+        if zconf:
+            zconf.stop_discovery()
 
 
 def set_volume(volume_percent, retries=5, delay=1):
@@ -470,18 +472,29 @@ def connect(device_name=None):
 @app.route("/devices")
 def devices():
     """List available Chromecast devices"""
-    chromecasts = get_chromecasts()
-    devices_list = []
-    for cc in chromecasts[0]:
-        devices_list.append(
-            {
-                "name": cc.cast_info.friendly_name,
-                "model": cc.cast_info.model_name,
-                "host": cc.cast_info.host,
-                "port": cc.cast_info.port,
-            }
-        )
-    return {"devices": devices_list}
+    zconf = None
+    try:
+        chromecasts, zconf = get_chromecasts()
+        devices_list = []
+        for cc in chromecasts:
+            devices_list.append(
+                {
+                    "name": cc.cast_info.friendly_name,
+                    "model": cc.cast_info.model_name,
+                    "host": cc.cast_info.host,
+                    "port": cc.cast_info.port,
+                }
+            )
+        return {"devices": devices_list}
+    except OSError as e:
+        app.logger.error(f"Error discovering Chromecast devices: {e}")
+        return {
+            "devices": [],
+            "error": "Device discovery failed - network buffer issue",
+        }
+    finally:
+        if zconf:
+            zconf.stop_discovery()
 
 
 @app.route("/volume/<int:value>")
