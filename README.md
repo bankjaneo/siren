@@ -66,23 +66,25 @@ Navigate to `http://localhost:5067` in your browser for the web UI.
 
 ### API Endpoints
 
-- **Play**: `curl http://localhost:5067/play` - Start streaming (auto-selects Google Nest Mini)
-- **Play with device**: `curl http://localhost:5067/play/Bedroom%20speaker` - Start streaming to specific device
-- **Pause**: `curl http://localhost:5067/pause` - Stop streaming
-- **Resume**: `curl http://localhost:5067/resume` - Continue streaming
-- **Status**: `curl http://localhost:5067/status` - Check current state (includes current file index and file)
-- **Previous**: `curl http://localhost:5067/previous` - Play previous file in playlist
-- **Next**: `curl http://localhost:5067/next` - Play next file in playlist
-- **Connect**: `curl http://localhost:5067/connect` - Connect to Google Nest Mini
-- **Connect with device**: `curl http://localhost:5067/connect/Bedroom%20speaker` - Connect to specific device
-- **Devices**: `curl http://localhost:5067/devices` - List available Chromecast devices
-- **Volume**: `curl http://localhost:5067/volume/75` - Set volume to 75%
-- **Files**: `curl http://localhost:5067/files` - List available MP3 files
-- **Config**: `curl http://localhost:5067/config` - Get application configuration
+| Endpoint | Description | Example |
+|----------|-------------|---------|
+| `GET /play` | Start streaming to default device (auto-selects Google Nest Mini) | `curl http://localhost:5067/play` |
+| `GET /play/DeviceName` | Start streaming to specific Chromecast device | `curl http://localhost:5067/play/Bedroom%20speaker` |
+| `GET /pause` | Stop streaming and pause playback | `curl http://localhost:5067/pause` |
+| `GET /resume` | Resume playback from paused state | `curl http://localhost:5067/resume` |
+| `GET /status` | Check current streaming state and file info | `curl http://localhost:5067/status` |
+| `GET /previous` | Play previous file in playlist | `curl http://localhost:5067/previous` |
+| `GET /next` | Play next file in playlist | `curl http://localhost:5067/next` |
+| `GET /connect` | Connect to default Chromecast device | `curl http://localhost:5067/connect` |
+| `GET /connect/DeviceName` | Connect to specific Chromecast device | `curl http://localhost:5067/connect/Bedroom%20speaker` |
+| `GET /devices` | List all available Chromecast devices | `curl http://localhost:5067/devices` |
+| `GET /volume/{level}` | Set volume level (1-100) | `curl http://localhost:5067/volume/75` |
+| `GET /files` | List available MP3 files | `curl http://localhost:5067/files` |
+| `GET /config` | Get current application configuration | `curl http://localhost:5067/config` |
 
 ### Play on Chromecast
 
-1. Start the server: `./start.sh` or `docker-compose up`
+1. Start the server: `./start.sh` or `docker-compose up -d`
 2. List available devices: `curl http://localhost:5067/devices`
 3. Navigate to `http://localhost:5067` in your browser
 4. Use `/play` to start the continuous loop (auto-selects Google Nest Mini)
