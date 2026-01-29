@@ -17,4 +17,4 @@ RUN mkdir -p music
 
 EXPOSE 5067
 
-CMD ["python", "stream_audio.py"]
+CMD ["sh", "-c", "export MUSIC_FOLDER=$MUSIC_FOLDER && export DEFAULT_DEVICE=$DEFAULT_DEVICE && export PORT=$PORT && export LOOP_DELAY=$LOOP_DELAY && export DEFAULT_VOLUME=$DEFAULT_VOLUME && python stream_audio.py"]

@@ -42,6 +42,20 @@ docker run --network=host -v $(pwd)/music:/app/music siren-stream
 docker-compose up --build
 ```
 
+4. Override configuration via environment variables:
+```bash
+docker-compose --env-file .env up --build
+```
+
+Create a `.env` file for custom configuration:
+```env
+MUSIC_FOLDER=/music
+DEFAULT_DEVICE=Living room speaker
+PORT=8080
+LOOP_DELAY=0.2
+DEFAULT_VOLUME=50
+```
+
 ## Usage
 
 The server will start on `http://localhost:5067`
@@ -84,17 +98,32 @@ The audio will start playing and loop continuously. Use `/play` or `/pause` endp
 
 ## Configuration
 
-The following variables in `stream_audio.py` can be customized:
+The following variables can be customized via environment variables or in `stream_audio.py`:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MUSIC_FOLDER` | `"music/"` | Folder containing MP3 files to stream |
-| `DEFAULT_DEVICE` | `"Google Nest Mini"` | Default Chromecast device name |
+| `DEFAULT_DEVICE` | `"Bedroom speaker"` | Default Chromecast device name |
 | `PORT` | `5067` | Server port number |
 | `LOOP_DELAY` | `0.1` | Delay between file reads (seconds) |
 | `DEFAULT_VOLUME` | `5` | Default volume level (1-100) |
 
-Edit these values in `stream_audio.py` before starting the server.
+### Docker Configuration
+
+For Docker deployments, you can override these values in `docker-compose.yml` or via `.env` file:
+
+```yaml
+environment:
+  - MUSIC_FOLDER=/music
+  - DEFAULT_DEVICE=Living room speaker
+  - PORT=8080
+  - LOOP_DELAY=0.2
+  - DEFAULT_VOLUME=50
+```
+
+### Local Configuration
+
+For local development, edit `stream_audio.py` directly:
 
 ## Notes
 
