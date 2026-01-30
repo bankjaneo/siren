@@ -9,7 +9,6 @@ from flask_cors import CORS
 from pychromecast import get_chromecasts
 from pychromecast.controllers.media import MediaController
 from zeroconf import Zeroconf, InterfaceChoice
-import threading
 
 # Suppress Flask development server warning
 logging.getLogger("werkzeug").setLevel(logging.INFO)
