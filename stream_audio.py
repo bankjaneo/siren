@@ -1,14 +1,26 @@
 #!/usr/bin/env python3
+"""Google Cast Audio Streamer - Flask application for streaming MP3 files to Chromecast devices"""
+
 import os
 import time
 import threading
 import logging
 import socket
+from typing import Optional, List, Dict, Generator, Any, Union, Tuple
 from flask import Flask, Response, request, render_template, send_from_directory
 from flask_cors import CORS
-from pychromecast import get_chromecasts
+import pychromecast
+from pychromecast import CastBrowser, get_chromecasts, get_chromecast_from_host
+from pychromecast.discovery import AbstractCastListener
 from pychromecast.controllers.media import MediaController
 from zeroconf import Zeroconf, InterfaceChoice
+
+# Configure logging with timestamps and context
+logging.basicConfig(
+    level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+)
+
+logger = logging.getLogger(__name__)
 
 # Suppress Flask development server warning
 logging.getLogger("werkzeug").setLevel(logging.INFO)
@@ -16,12 +28,14 @@ logging.getLogger("werkzeug").setLevel(logging.INFO)
 app = Flask(__name__)
 CORS(app)
 
+# Environment configuration
 MUSIC_FOLDER = os.environ.get("MUSIC_FOLDER", "music/")
 DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "Bedroom speaker")
 PORT = int(os.environ.get("PORT", "5067"))
 LOOP_DELAY = float(os.environ.get("LOOP_DELAY", "0.1"))
 DEFAULT_VOLUME = int(os.environ.get("DEFAULT_VOLUME", "5"))
 
+# Global state variables (thread-safe)
 is_paused = True
 pause_event = threading.Event()
 restart_event = threading.Event()
@@ -31,12 +45,16 @@ selected_device = None
 current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
 current_file_index = 0
-mp3_files = []
+mp3_files: List[str] = []
 streaming_started = False
 
 
-def get_lan_ip():
-    """Get the LAN IP address of the machine"""
+def get_lan_ip() -> str:
+    """Get the LAN IP address of the machine
+
+    Returns:
+        str: Local IP address or 'localhost' on failure
+    """
     try:
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect(("8.8.8.8", 80))
@@ -44,142 +62,228 @@ def get_lan_ip():
         s.close()
         return lan_ip
     except Exception:
+        logger.warning("Could not determine LAN IP, using localhost")
         return "localhost"
 
 
-def get_mp3_files():
-    """Get all MP3 files from the music folder"""
+def get_mp3_files() -> List[str]:
+    """Get all MP3 files from the music folder
+
+    Returns:
+        List[str]: Sorted list of MP3 file paths
+    """
     if not os.path.exists(MUSIC_FOLDER):
+        logger.warning(f"Music folder not found: {MUSIC_FOLDER}")
         return []
 
-    mp3_files = []
+    mp3_files_list = []
     for filename in os.listdir(MUSIC_FOLDER):
         if filename.lower().endswith(".mp3"):
-            mp3_files.append(os.path.join(MUSIC_FOLDER, filename))
+            mp3_files_list.append(os.path.join(MUSIC_FOLDER, filename))
 
-    return sorted(mp3_files)
+    return sorted(mp3_files_list)
 
 
-def create_zeroconf():
-    """Create a Zeroconf instance with interface binding to avoid buffer issues"""
+def create_zeroconf() -> Zeroconf:
+    """Create a Zeroconf instance with interface binding to avoid buffer issues
+
+    Returns:
+        Zeroconf: Configured Zeroconf instance
+    """
     try:
-        # Try to use all interfaces first
         return Zeroconf(interfaces=InterfaceChoice.All)
     except OSError:
-        # Fall back to default interface only
+        logger.debug("InterfaceChoice.All failed, trying InterfaceChoice.Default")
         try:
             return Zeroconf(interfaces=InterfaceChoice.Default)
         except OSError:
-            # Last resort: bind to the main network interface IP only
+            logger.debug("InterfaceChoice.Default failed, trying specific IP")
             lan_ip = get_lan_ip()
             if lan_ip != "localhost":
                 return Zeroconf(interfaces=[lan_ip])
             raise
 
 
-def find_chromecast(device_name=None):
-    """Find and connect to Chromecast device"""
+def find_chromecast(device_name: Optional[str] = None) -> bool:
+    """Find and connect to Chromecast device
+
+    Args:
+        device_name: Optional specific device name to connect to
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
     global chromecast, media_controller
+
+    class CastDeviceListener(AbstractCastListener):
+        """Listener for Chromecast discovery events."""
+
+        def __init__(self):
+            self.found_device = None
+
+        def add_cast(self, uuid, service):
+            """Called when a new Chromecast device is discovered."""
+            device = browser.services[uuid]
+            friendly_name = device.friendly_name
+            logger.debug(f"Discovered device: {friendly_name}")
+
+            if device_name:
+                if device_name in friendly_name:
+                    self.found_device = device
+            elif DEFAULT_DEVICE in friendly_name:
+                self.found_device = device
+
+        def remove_cast(self, uuid, service, cast_info):
+            """Called when a Chromecast device is removed."""
+            pass
+
+        def update_cast(self, uuid, service):
+            """Called when a Chromecast device is updated."""
+            pass
 
     zconf = None
     try:
+        logger.info(
+            f"Searching for Chromecast device... (name: {device_name or DEFAULT_DEVICE})"
+        )
         zconf = create_zeroconf()
-        chromecasts, browser = get_chromecasts(zeroconf_instance=zconf)
 
-        if not chromecasts:
+        listener = CastDeviceListener()
+        browser = CastBrowser(listener, zconf, known_hosts=None)
+        browser.start_discovery()
+
+        timeout = 5
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if listener.found_device:
+                break
+            time.sleep(0.1)
+
+        browser.stop_discovery()
+
+        if not listener.found_device:
+            logger.warning(
+                f"No Chromecast device found for: {device_name or DEFAULT_DEVICE}"
+            )
             return False
 
-        # Find specific device if name provided
-        if device_name:
-            for cc in chromecasts:
-                if device_name in cc.cast_info.friendly_name:
-                    chromecast = cc
-                    break
-        else:
-            # Try to find default device specifically
-            for cc in chromecasts:
-                if DEFAULT_DEVICE in cc.cast_info.friendly_name:
-                    chromecast = cc
-                    break
+        cast_info = listener.found_device
 
-        if not chromecast:
-            return False
-
-        # Connect to the device
-        chromecast.start()
-
-        # Wait for connection to be ready
-        time.sleep(2)
+        # Create Chromecast object from CastInfo
+        logger.info("Connecting to Chromecast...")
+        chromecast = pychromecast.get_chromecast_from_host(
+            (
+                cast_info.host,
+                cast_info.port,
+                cast_info.uuid,
+                cast_info.model_name,
+                cast_info.friendly_name,
+            )
+        )
+        chromecast.wait()
 
         # Use the built-in media controller
         media_controller = chromecast.media_controller
 
         # Set volume with retry
-        set_volume(current_volume)
+        if set_volume(current_volume):
+            logger.info(f"Chromecast connected successfully, volume: {current_volume}%")
+            return True
+        else:
+            logger.error("Failed to set volume after connection")
+            return False
 
-        return True
     except OSError as e:
-        app.logger.error(f"Error during Chromecast discovery: {e}")
+        logger.error(f"Error during Chromecast discovery: {e}")
+        return False
+    except Exception as e:
+        logger.error(f"Unexpected error finding Chromecast: {e}", exc_info=True)
         return False
     finally:
         if zconf:
             zconf.close()
 
 
-def set_volume(volume_percent, retries=5, delay=1):
-    """Set volume of connected Chromecast with retry mechanism"""
+def set_volume(volume_percent: int, retries: int = 5, delay: float = 1) -> bool:
+    """Set volume of connected Chromecast with retry mechanism
+
+    Args:
+        volume_percent: Volume level between 1-100
+        retries: Number of retry attempts
+        delay: Delay between retries in seconds
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
     global current_volume, chromecast
 
     if chromecast is None:
+        logger.warning("Cannot set volume: No Chromecast connected")
         return False
 
     # Convert 1-100 to 0.0-1.0
     volume = max(0.0, min(1.0, volume_percent / 100.0))
 
+    logger.info(f"Setting volume to {volume_percent}%")
     for attempt in range(retries):
         try:
             if chromecast and chromecast.status:
                 chromecast.set_volume(volume)
                 current_volume = volume_percent
+                logger.info(f"Volume successfully set to {volume_percent}%")
                 return True
             else:
+                logger.debug(f"Attempt {attempt + 1}/{retries}: Chromecast not ready")
                 time.sleep(delay)
-        except Exception:
+        except Exception as e:
+            logger.debug(f"Attempt {attempt + 1}/{retries} failed: {e}")
             if attempt < retries - 1:
                 time.sleep(delay)
             else:
+                logger.error("Failed to set volume after all retries")
                 return False
 
     return False
 
 
-def stream_audio():
-    """Stream MP3 files from music folder to Chromecast"""
+def stream_audio() -> Generator[bytes, None, None]:
+    """Stream MP3 files from music folder to Chromecast
+
+    Yields:
+        bytes: Audio data chunks
+    """
     global is_paused, chromecast, media_controller, current_file_index
 
-    mp3_files = get_mp3_files()
+    global_mp3_files = get_mp3_files()
 
-    if not mp3_files:
+    if not global_mp3_files:
+        logger.warning("No MP3 files available for streaming")
         return
 
     if chromecast is None:
         if not find_chromecast():
+            logger.error("Could not connect to Chromecast for streaming")
             return
 
+    logger.info("Starting audio stream")
     while True:
         if pause_event.is_set():
+            logger.info("Playback paused")
             while pause_event.is_set():
                 time.sleep(0.1)
 
-        current_file = mp3_files[current_file_index]
+        current_file = global_mp3_files[current_file_index]
 
         try:
+            logger.info(f"Playing file: {current_file}")
             with open(current_file, "rb") as f:
                 while True:
                     if pause_event.is_set():
+                        logger.info("Stopping current file due to pause")
                         break
                     if restart_event.is_set():
                         restart_event.clear()
+                        logger.info("Restarting playback")
                         break
 
                     data = f.read(4096)
@@ -188,6 +292,7 @@ def stream_audio():
 
                     yield data
         except Exception:
+            logger.warning(f"Error streaming file: {current_file}")
             pass
 
         # Check if we need to restart
@@ -196,15 +301,19 @@ def stream_audio():
             continue
 
         # Move to next file
-        current_file_index = (current_file_index + 1) % len(mp3_files)
+        current_file_index = (current_file_index + 1) % len(global_mp3_files)
 
         if not is_paused:
             time.sleep(LOOP_DELAY)
 
 
 @app.route("/stream")
-def stream_audio_endpoint():
-    """Serve the audio stream"""
+def stream_audio_endpoint() -> Response:
+    """Serve the audio stream
+
+    Returns:
+        Response: Flask response with audio data
+    """
     return Response(
         stream_audio(),
         mimetype="audio/mpeg",
@@ -219,31 +328,50 @@ def stream_audio_endpoint():
 
 
 @app.route("/")
-def index():
-    """Serve the web UI"""
+def index() -> str:
+    """Serve the web UI
+
+    Returns:
+        str: Rendered HTML template
+    """
     return render_template("index.html")
 
 
 @app.route("/favicon.ico")
-def favicon():
-    """Serve the favicon"""
+def favicon() -> str:
+    """Serve the favicon
+
+    Returns:
+        str: Favicon file
+    """
     return send_from_directory("", "favicon.png")
 
 
 @app.route("/play")
 @app.route("/play/<device_name>")
-def play(device_name=None):
-    """Start the audio stream"""
+def play(device_name: Optional[str] = None) -> Dict[str, Any]:
+    """Start the audio stream
+
+    Args:
+        device_name: Optional specific device name to use
+
+    Returns:
+        Dict: Status and message
+    """
     global is_paused, chromecast, media_controller, current_file_index
 
     # Check for music files first
-    mp3_files = get_mp3_files()
-    if not mp3_files:
+    mp3_files_list = get_mp3_files()
+    if not mp3_files_list:
+        logger.error("No MP3 files found in music/")
         return {"status": "failed", "message": "No MP3 files found in music/"}
 
     # Connect if not already connected
     if chromecast is None:
         if not find_chromecast(device_name):
+            logger.error(
+                f"Failed to connect to Chromecast: {device_name or DEFAULT_DEVICE}"
+            )
             return {"status": "failed", "message": "Could not find Chromecast device"}
 
     with lock:
@@ -256,6 +384,7 @@ def play(device_name=None):
     # Stop current playback
     if media_controller and chromecast:
         try:
+            logger.info("Stopping current playback")
             media_controller.stop()
         except Exception:
             pass
@@ -269,6 +398,8 @@ def play(device_name=None):
         try:
             local_ip = get_lan_ip()
             stream_url = f"http://{local_ip}:{PORT}/stream"
+
+            logger.info(f"Playing stream from: {stream_url}")
 
             # Try with stream_type parameter
             media_controller.play_media(
@@ -285,44 +416,60 @@ def play(device_name=None):
             while time.time() - start_time < timeout:
                 status = media_controller.status
                 if status.player_state == "PLAYING":
-                    return {"status": "playing", "files": len(mp3_files)}
+                    logger.info("Playback started successfully")
+                    return {"status": "playing", "files": len(mp3_files_list)}
+
                 time.sleep(1)
 
+            logger.error(f"Timeout waiting for playback to start (waited {timeout}s)")
             return {
                 "status": "failed",
                 "message": "Timeout waiting for playback to start",
             }
 
-        except Exception:
+        except Exception as e:
+            logger.error(f"Error starting playback: {e}")
             return {"status": "failed", "message": "Error starting playback"}
 
-    return {"status": "playing", "files": len(mp3_files)}
+    return {"status": "playing", "files": len(mp3_files_list)}
 
 
 @app.route("/pause")
-def pause():
-    """Pause the audio stream"""
-    global is_paused, is_playing
+def pause() -> Dict[str, str]:
+    """Pause the audio stream
+
+    Returns:
+        Dict: Status
+    """
+    global is_paused
+
+    logger.info("Pause requested")
 
     with lock:
         is_paused = True
-        is_playing = False
         pause_event.set()
 
     # Also pause the media player on Chromecast
     if media_controller and chromecast:
         try:
+            logger.info("Pausing media controller")
             media_controller.pause()
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error pausing media controller: {e}")
 
     return {"status": "paused"}
 
 
 @app.route("/resume")
-def resume():
-    """Resume the audio stream"""
+def resume() -> Dict[str, str]:
+    """Resume the audio stream
+
+    Returns:
+        Dict: Status
+    """
     global is_paused, streaming_started
+
+    logger.info("Resume requested")
 
     with lock:
         is_paused = False
@@ -333,6 +480,7 @@ def resume():
         streaming_started = True
         streaming_thread = threading.Thread(target=stream_audio, daemon=True)
         streaming_thread.start()
+        logger.info("Starting audio stream for resume")
 
     # Resume the media player on Chromecast
     if media_controller and chromecast:
@@ -342,6 +490,7 @@ def resume():
                 # Check if there's an active session
                 if status.player_state == "IDLE" or status.player_state == "UNKNOWN":
                     # No active session, need to start playback
+                    logger.info("No active session found, starting playback")
                     local_ip = get_lan_ip()
                     stream_url = f"http://{local_ip}:{PORT}/stream"
                     media_controller.play_media(
@@ -352,46 +501,66 @@ def resume():
                         title="Stream",
                     )
                 else:
+                    logger.info("Resuming media controller")
                     media_controller.play()
-        except Exception:
-            pass
+            else:
+                logger.info("Media already playing")
+        except Exception as e:
+            logger.error(f"Error resuming media controller: {e}")
 
     return {"status": "resumed"}
 
 
 @app.route("/status")
-def status():
-    """Get current status"""
+def status() -> Dict[str, Any]:
+    """Get current status
+
+    Returns:
+        Dict: Current status information
+    """
     global current_file_index
-    mp3_files = get_mp3_files()
+    mp3_files_list = get_mp3_files()
     return {
         "is_paused": is_paused,
-        "files_count": len(mp3_files),
+        "files_count": len(mp3_files_list),
         "chromecast_connected": chromecast is not None,
-        "selected_device": chromecast.cast_info.friendly_name if chromecast else None,
+        "selected_device": chromecast.name if chromecast else None,
         "current_file_index": current_file_index,
-        "current_file": mp3_files[current_file_index] if mp3_files else None,
+        "current_file": mp3_files_list[current_file_index] if mp3_files_list else None,
     }
 
 
 @app.route("/files")
-def files():
-    """Get list of MP3 files"""
+def files() -> Dict[str, Any]:
+    """Get list of MP3 files
+
+    Returns:
+        Dict: List of files and current index
+    """
     global current_file_index
-    mp3_files = get_mp3_files()
-    # Strip the MUSIC_FOLDER prefix from file paths
-    files = [f.replace(MUSIC_FOLDER, "") for f in mp3_files]
+    mp3_files_list = get_mp3_files()
+    files = [f.replace(MUSIC_FOLDER, "") for f in mp3_files_list]
     return {"files": files, "current_file_index": current_file_index}
 
 
 @app.route("/previous")
-def previous():
-    """Play previous file in the playlist"""
+def previous() -> Dict[str, Any]:
+    """Play previous file in the playlist
+
+    Returns:
+        Dict: Status and file index
+    """
     global current_file_index, is_paused
-    mp3_files = get_mp3_files()
-    if not mp3_files:
+    mp3_files_list = get_mp3_files()
+    if not mp3_files_list:
+        logger.error("No MP3 files available")
         return {"status": "failed", "message": "No MP3 files found"}
-    current_file_index = (current_file_index - 1 + len(mp3_files)) % len(mp3_files)
+
+    current_file_index = (current_file_index - 1 + len(mp3_files_list)) % len(
+        mp3_files_list
+    )
+    logger.info(f"Playing previous file: {current_file_index}")
+
     with lock:
         is_paused = False
         pause_event.clear()
@@ -399,6 +568,7 @@ def previous():
 
     if media_controller and chromecast:
         try:
+            logger.info("Stopping media controller for next track")
             media_controller.stop()
             local_ip = get_lan_ip()
             stream_url = f"http://{local_ip}:{PORT}/stream"
@@ -409,19 +579,27 @@ def previous():
                 autoplay=True,
                 title="Stream",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error playing previous: {e}")
     return {"status": "success", "file_index": current_file_index}
 
 
 @app.route("/next")
-def next():
-    """Play next file in the playlist"""
+def next() -> Dict[str, Any]:
+    """Play next file in the playlist
+
+    Returns:
+        Dict: Status and file index
+    """
     global current_file_index, is_paused
-    mp3_files = get_mp3_files()
-    if not mp3_files:
+    mp3_files_list = get_mp3_files()
+    if not mp3_files_list:
+        logger.error("No MP3 files available")
         return {"status": "failed", "message": "No MP3 files found"}
-    current_file_index = (current_file_index + 1) % len(mp3_files)
+
+    current_file_index = (current_file_index + 1) % len(mp3_files_list)
+    logger.info(f"Playing next file: {current_file_index}")
+
     with lock:
         is_paused = False
         pause_event.clear()
@@ -429,6 +607,7 @@ def next():
 
     if media_controller and chromecast:
         try:
+            logger.info("Stopping media controller for next track")
             media_controller.stop()
             local_ip = get_lan_ip()
             stream_url = f"http://{local_ip}:{PORT}/stream"
@@ -439,15 +618,23 @@ def next():
                 autoplay=True,
                 title="Stream",
             )
-        except Exception:
-            pass
+        except Exception as e:
+            logger.error(f"Error playing next: {e}")
     return {"status": "success", "file_index": current_file_index}
 
 
 @app.route("/connect")
 @app.route("/connect/<device_name>")
-def connect(device_name=None):
-    """Connect to Chromecast device"""
+def connect(device_name: Optional[str] = None) -> Dict[str, Any]:
+    """Connect to Chromecast device
+
+    Args:
+        device_name: Optional specific device name
+
+    Returns:
+        Dict: Connection status and device info
+    """
+    logger.info(f"Connecting to Chromecast: {device_name or DEFAULT_DEVICE}")
     with lock:
         if find_chromecast(device_name):
             return {
@@ -459,25 +646,57 @@ def connect(device_name=None):
 
 
 @app.route("/devices")
-def devices():
-    """List available Chromecast devices"""
+def devices() -> Dict[str, Any]:
+    """List available Chromecast devices
+
+    Returns:
+        Dict: List of devices or error
+    """
     zconf = None
     try:
         zconf = create_zeroconf()
-        chromecasts, browser = get_chromecasts(zeroconf_instance=zconf)
-        devices_list = []
-        for cc in chromecasts:
-            devices_list.append(
-                {
-                    "name": cc.cast_info.friendly_name,
-                    "model": cc.cast_info.model_name,
-                    "host": cc.cast_info.host,
-                    "port": cc.cast_info.port,
-                }
-            )
-        return {"devices": devices_list}
+
+        class DeviceListListener(AbstractCastListener):
+            """Listener for collecting device information."""
+
+            def __init__(self):
+                self.devices = []
+
+            def add_cast(self, uuid, service):
+                """Called when a new Chromecast device is discovered."""
+                device = browser.services[uuid]
+                self.devices.append(
+                    {
+                        "name": device.friendly_name,
+                        "model": device.model_name,
+                        "host": device.host,
+                        "port": device.port,
+                    }
+                )
+
+            def remove_cast(self, uuid, service, cast_info):
+                """Called when a Chromecast device is removed."""
+                pass
+
+            def update_cast(self, uuid, service):
+                """Called when a Chromecast device is updated."""
+                pass
+
+        listener = DeviceListListener()
+        browser = CastBrowser(listener, zconf, known_hosts=None)
+        browser.start_discovery()
+
+        timeout = 5
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            time.sleep(0.1)
+
+        browser.stop_discovery()
+
+        logger.info(f"Found {len(listener.devices)} Chromecast devices")
+        return {"devices": listener.devices}
     except OSError as e:
-        app.logger.error(f"Error discovering Chromecast devices: {e}")
+        logger.error(f"Error discovering Chromecast devices: {e}")
         return {
             "devices": [],
             "error": "Device discovery failed - network buffer issue",
@@ -488,14 +707,25 @@ def devices():
 
 
 @app.route("/volume/<int:value>")
-def volume(value):
-    """Set volume of connected Chromecast"""
+def volume(value: int) -> Dict[str, Any]:
+    """Set volume of connected Chromecast
+
+    Args:
+        value: Volume level between 1-100
+
+    Returns:
+        Dict: Volume status or error
+    """
     global current_volume
 
+    logger.info(f"Setting volume to {value}%")
+
     if chromecast is None:
+        logger.warning("Cannot set volume: No Chromecast connected")
         return {"status": "failed", "message": "No Chromecast device connected"}
 
     if value < 1 or value > 100:
+        logger.warning(f"Invalid volume value: {value}")
         return {"status": "failed", "message": "Volume must be between 1 and 100"}
 
     with lock:
@@ -509,8 +739,12 @@ def volume(value):
 
 
 @app.route("/config")
-def config():
-    """Get application configuration"""
+def config() -> Dict[str, Any]:
+    """Get application configuration
+
+    Returns:
+        Dict: Current configuration
+    """
     return {
         "default_volume": DEFAULT_VOLUME,
         "current_volume": current_volume,
