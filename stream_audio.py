@@ -6,13 +6,12 @@ import time
 import threading
 import logging
 import socket
-from typing import Optional, List, Dict, Generator, Any, Union, Tuple
-from flask import Flask, Response, request, render_template, send_from_directory
+from typing import Optional, List, Dict, Generator, Any
+from flask import Flask, Response, render_template, send_from_directory
 from flask_cors import CORS
 import pychromecast
-from pychromecast import CastBrowser, get_chromecasts, get_chromecast_from_host
+from pychromecast import CastBrowser, get_chromecast_from_host
 from pychromecast.discovery import AbstractCastListener
-from pychromecast.controllers.media import MediaController
 from zeroconf import Zeroconf, InterfaceChoice
 
 # Configure logging with timestamps and context
@@ -41,11 +40,9 @@ pause_event = threading.Event()
 restart_event = threading.Event()
 chromecast = None
 media_controller = None
-selected_device = None
 current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
 current_file_index = 0
-mp3_files: List[str] = []
 streaming_started = False
 
 
@@ -246,6 +243,33 @@ def set_volume(volume_percent: int, retries: int = 5, delay: float = 1) -> bool:
     return False
 
 
+def play_stream_on_chromecast() -> bool:
+    """Start playing the audio stream on the connected Chromecast
+
+    Returns:
+        bool: True if playback started successfully, False otherwise
+    """
+    if not media_controller or not chromecast:
+        return False
+
+    try:
+        local_ip = get_lan_ip()
+        stream_url = f"http://{local_ip}:{PORT}/stream"
+        logger.info(f"Playing stream from: {stream_url}")
+
+        media_controller.play_media(
+            stream_url,
+            "audio/mpeg",
+            stream_type="BUFFERED",
+            autoplay=True,
+            title="Stream",
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error starting playback: {e}")
+        return False
+
+
 def stream_audio() -> Generator[bytes, None, None]:
     """Stream MP3 files from music folder to Chromecast
 
@@ -394,44 +418,21 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
     streaming_thread.start()
 
     # Start playback on Chromecast
-    if media_controller and chromecast:
-        try:
-            local_ip = get_lan_ip()
-            stream_url = f"http://{local_ip}:{PORT}/stream"
+    if not play_stream_on_chromecast():
+        return {"status": "playing", "files": len(mp3_files_list)}
 
-            logger.info(f"Playing stream from: {stream_url}")
+    # Wait for player state to change
+    timeout = 30
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        status = media_controller.status
+        if status.player_state == "PLAYING":
+            logger.info("Playback started successfully")
+            return {"status": "playing", "files": len(mp3_files_list)}
+        time.sleep(1)
 
-            # Try with stream_type parameter
-            media_controller.play_media(
-                stream_url,
-                "audio/mpeg",
-                stream_type="BUFFERED",
-                autoplay=True,
-                title="Stream",
-            )
-
-            # Wait for player state to change
-            timeout = 30
-            start_time = time.time()
-            while time.time() - start_time < timeout:
-                status = media_controller.status
-                if status.player_state == "PLAYING":
-                    logger.info("Playback started successfully")
-                    return {"status": "playing", "files": len(mp3_files_list)}
-
-                time.sleep(1)
-
-            logger.error(f"Timeout waiting for playback to start (waited {timeout}s)")
-            return {
-                "status": "failed",
-                "message": "Timeout waiting for playback to start",
-            }
-
-        except Exception as e:
-            logger.error(f"Error starting playback: {e}")
-            return {"status": "failed", "message": "Error starting playback"}
-
-    return {"status": "playing", "files": len(mp3_files_list)}
+    logger.error(f"Timeout waiting for playback to start (waited {timeout}s)")
+    return {"status": "failed", "message": "Timeout waiting for playback to start"}
 
 
 @app.route("/pause")
@@ -488,18 +489,10 @@ def resume() -> Dict[str, str]:
             status = media_controller.status
             if status and status.player_state != "PLAYING":
                 # Check if there's an active session
-                if status.player_state == "IDLE" or status.player_state == "UNKNOWN":
+                if status.player_state in ("IDLE", "UNKNOWN"):
                     # No active session, need to start playback
                     logger.info("No active session found, starting playback")
-                    local_ip = get_lan_ip()
-                    stream_url = f"http://{local_ip}:{PORT}/stream"
-                    media_controller.play_media(
-                        stream_url,
-                        "audio/mpeg",
-                        stream_type="BUFFERED",
-                        autoplay=True,
-                        title="Stream",
-                    )
+                    play_stream_on_chromecast()
                 else:
                     logger.info("Resuming media controller")
                     media_controller.play()
@@ -568,17 +561,9 @@ def previous() -> Dict[str, Any]:
 
     if media_controller and chromecast:
         try:
-            logger.info("Stopping media controller for next track")
+            logger.info("Stopping media controller for previous track")
             media_controller.stop()
-            local_ip = get_lan_ip()
-            stream_url = f"http://{local_ip}:{PORT}/stream"
-            media_controller.play_media(
-                stream_url,
-                "audio/mpeg",
-                stream_type="BUFFERED",
-                autoplay=True,
-                title="Stream",
-            )
+            play_stream_on_chromecast()
         except Exception as e:
             logger.error(f"Error playing previous: {e}")
     return {"status": "success", "file_index": current_file_index}
@@ -609,15 +594,7 @@ def next() -> Dict[str, Any]:
         try:
             logger.info("Stopping media controller for next track")
             media_controller.stop()
-            local_ip = get_lan_ip()
-            stream_url = f"http://{local_ip}:{PORT}/stream"
-            media_controller.play_media(
-                stream_url,
-                "audio/mpeg",
-                stream_type="BUFFERED",
-                autoplay=True,
-                title="Stream",
-            )
+            play_stream_on_chromecast()
         except Exception as e:
             logger.error(f"Error playing next: {e}")
     return {"status": "success", "file_index": current_file_index}
