@@ -310,6 +310,33 @@
             }, 5000);
         }
 
+        async function fetchWithHandling(endpoint, successCallback, errorMessage) {
+            try {
+                const response = await fetch(endpoint);
+                const result = await response.json();
+                if (result.status === 'success' || result.status === 'playing' || result.status === 'paused' || result.status === 'resumed') {
+                    if (successCallback) {
+                        successCallback(result);
+                    }
+                } else {
+                    showError(result.message || errorMessage);
+                }
+            } catch (error) {
+                showError(errorMessage + ': ' + error.message);
+            }
+        }
+
+        function updateVolumeDisplay(value) {
+            const volumeValue = document.getElementById('volume-value');
+            const volumeDisplay = document.getElementById('volume-display');
+            if (volumeValue) {
+                volumeValue.textContent = value;
+            }
+            if (volumeDisplay) {
+                volumeDisplay.textContent = value;
+            }
+        }
+
         async function loadConfig() {
             try {
                 const response = await fetch('/config');
@@ -389,100 +416,30 @@
         }
 
         async function playAudio() {
-            try {
-                const response = await fetch('/play');
-                const result = await response.json();
-
-                if (result.status === 'playing') {
-                    refreshStatus();
-                } else {
-                    showError(result.message || 'Failed to play');
-                }
-            } catch (error) {
-                showError('Failed to play: ' + error.message);
-            }
+            await fetchWithHandling('/play', refreshStatus, 'Failed to play');
         }
 
         async function pauseAudio() {
-            try {
-                const response = await fetch('/pause');
-                const result = await response.json();
-
-                if (result.status === 'paused') {
-                    refreshStatus();
-                }
-            } catch (error) {
-                showError('Failed to pause: ' + error.message);
-            }
+            await fetchWithHandling('/pause', refreshStatus, 'Failed to pause');
         }
 
         async function resumeAudio() {
-            try {
-                const response = await fetch('/resume');
-                const result = await response.json();
-
-                if (result.status === 'resumed') {
-                    refreshStatus();
-                }
-            } catch (error) {
-                showError('Failed to resume: ' + error.message);
-            }
+            await fetchWithHandling('/resume', refreshStatus, 'Failed to resume');
         }
 
         async function previousAudio() {
-            try {
-                const response = await fetch('/previous');
-                const result = await response.json();
-
-                if (result.status === 'success') {
-                    refreshStatus();
-                } else {
-                    showError(result.message || 'Failed to play previous');
-                }
-            } catch (error) {
-                showError('Failed to play previous: ' + error.message);
-            }
+            await fetchWithHandling('/previous', refreshStatus, 'Failed to play previous');
         }
 
         async function nextAudio() {
-            try {
-                const response = await fetch('/next');
-                const result = await response.json();
-
-                if (result.status === 'success') {
-                    refreshStatus();
-                } else {
-                    showError(result.message || 'Failed to play next');
-                }
-            } catch (error) {
-                showError('Failed to play next: ' + error.message);
-            }
+            await fetchWithHandling('/next', refreshStatus, 'Failed to play next');
         }
 
         async function setVolume(value) {
             currentVolume = value;
+            updateVolumeDisplay(value);
 
-            const volumeValue = document.getElementById('volume-value');
-            const volumeDisplay = document.getElementById('volume-display');
-            if (volumeValue) {
-                volumeValue.textContent = value;
-            }
-            if (volumeDisplay) {
-                volumeDisplay.textContent = value;
-            }
-
-            try {
-                const response = await fetch(`/volume/${value}`);
-                const result = await response.json();
-
-                if (result.status === 'success') {
-                    refreshStatus();
-                } else {
-                    showError(result.message || 'Failed to set volume');
-                }
-            } catch (error) {
-                showError('Failed to set volume: ' + error.message);
-            }
+            await fetchWithHandling(`/volume/${value}`, refreshStatus, 'Failed to set volume');
         }
 
         async function loadDevices() {
