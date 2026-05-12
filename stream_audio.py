@@ -37,14 +37,11 @@ DEFAULT_VOLUME = int(os.environ.get("DEFAULT_VOLUME", "5"))
 
 # Global state variables (thread-safe)
 is_paused = True
-pause_event = threading.Event()
-restart_event = threading.Event()
 chromecast = None
 media_controller = None
 current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
 current_file_index = 0
-streaming_started = False
 
 
 def get_lan_ip() -> str:
@@ -301,76 +298,54 @@ def play_stream_on_chromecast() -> bool:
         return False
 
 
-def stream_audio() -> Generator[bytes, None, None]:
-    """Stream MP3 files from music folder to Chromecast
+def stream_audio(file_index: int) -> Generator[bytes, None, None]:
+    """Stream a single MP3 file to Chromecast
+
+    Args:
+        file_index: Index of the file to stream
 
     Yields:
         bytes: Audio data chunks
     """
-    global is_paused, chromecast, media_controller, current_file_index
-
     global_mp3_files = get_mp3_files()
 
     if not global_mp3_files:
         logger.warning("No MP3 files available for streaming")
         return
 
-    if chromecast is None:
-        if not find_chromecast():
-            logger.error("Could not connect to Chromecast for streaming")
-            return
+    if file_index < 0 or file_index >= len(global_mp3_files):
+        logger.warning(f"Invalid file index: {file_index}")
+        return
 
-    logger.info("Starting audio stream")
-    while True:
-        if pause_event.is_set():
-            logger.info("Playback paused")
-            while pause_event.is_set():
-                time.sleep(0.1)
+    current_file = global_mp3_files[file_index]
+    logger.info(f"Streaming file: {current_file}")
 
-        current_file = global_mp3_files[current_file_index]
+    # Typical MP3 bitrate: 128kbps = 16KB/s, use 4KB chunks every 0.25s
+    chunk_size = 4096
+    chunk_interval = 0.25  # seconds between chunks
 
-        try:
-            logger.info(f"Playing file: {current_file}")
-            with open(current_file, "rb") as f:
-                while True:
-                    if pause_event.is_set():
-                        logger.info("Stopping current file due to pause")
-                        break
-                    if restart_event.is_set():
-                        restart_event.clear()
-                        logger.info("Restarting playback")
-                        break
-
-                    data = f.read(4096)
-                    if not data:
-                        break
-
-                    yield data
-        except Exception:
-            logger.warning(f"Error streaming file: {current_file}")
-            pass
-
-        # Check if we need to restart
-        if restart_event.is_set():
-            restart_event.clear()
-            continue
-
-        # Move to next file
-        current_file_index = (current_file_index + 1) % len(global_mp3_files)
-
-        if not is_paused:
-            time.sleep(LOOP_DELAY)
+    try:
+        with open(current_file, "rb") as f:
+            while True:
+                data = f.read(chunk_size)
+                if not data:
+                    break
+                yield data
+                # Rate limit to simulate proper streaming
+                time.sleep(chunk_interval)
+    except Exception as e:
+        logger.warning(f"Error streaming file: {current_file}: {e}")
 
 
 @app.route("/stream")
 def stream_audio_endpoint() -> Response:
-    """Serve the audio stream
+    """Serve the audio stream for the current file
 
     Returns:
         Response: Flask response with audio data
     """
     return Response(
-        stream_audio(),
+        stream_audio(current_file_index),
         mimetype="audio/mpeg",
         headers={
             "Cache-Control": "no-cache",
@@ -378,6 +353,7 @@ def stream_audio_endpoint() -> Response:
             "Expires": "0",
             "Access-Control-Allow-Origin": "*",
             "Content-Type": "audio/mpeg",
+            "Connection": "keep-alive",
         },
     )
 
@@ -425,11 +401,13 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
             return {"status": "failed", "message": "Could not find Chromecast device"}
 
     with lock:
+        # Prevent duplicate play requests
+        if not is_paused:
+            logger.info("Playback already in progress, ignoring duplicate play request")
+            return {"status": "playing", "message": "Already playing"}
+        
         is_paused = False
-        pause_event.clear()
-        streaming_started = True
         current_file_index = 0
-        restart_event.clear()
 
     # Stop current playback
     if media_controller and chromecast:
@@ -441,11 +419,7 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
 
     mp3_files_list = get_mp3_files()
 
-    # Start audio streaming in background thread
-    streaming_thread = threading.Thread(target=stream_audio, daemon=True)
-    streaming_thread.start()
-
-    # Start playback on Chromecast
+    # Start playback on Chromecast (which will fetch /stream endpoint)
     if not play_stream_on_chromecast():
         return {"status": "playing", "files": len(mp3_files_list)}
 
@@ -476,9 +450,8 @@ def pause() -> Dict[str, str]:
 
     with lock:
         is_paused = True
-        pause_event.set()
 
-    # Also pause the media player on Chromecast
+    # Pause the media player on Chromecast
     if media_controller and chromecast:
         try:
             logger.info("Pausing media controller")
@@ -496,20 +469,12 @@ def resume() -> Dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused, streaming_started
+    global is_paused, current_file_index
 
     logger.info("Resume requested")
 
     with lock:
         is_paused = False
-        pause_event.clear()
-
-    # If streaming hasn't started yet, treat as /play
-    if not streaming_started:
-        streaming_started = True
-        streaming_thread = threading.Thread(target=stream_audio, daemon=True)
-        streaming_thread.start()
-        logger.info("Starting audio stream for resume")
 
     # Resume the media player on Chromecast
     if media_controller and chromecast:
@@ -518,8 +483,8 @@ def resume() -> Dict[str, str]:
             if status and status.player_state != "PLAYING":
                 # Check if there's an active session
                 if status.player_state in ("IDLE", "UNKNOWN"):
-                    # No active session, need to start playback
-                    logger.info("No active session found, starting playback")
+                    # No active session, need to restart playback from current file
+                    logger.info(f"No active session, restarting from file {current_file_index}")
                     play_stream_on_chromecast()
                 else:
                     logger.info("Resuming media controller")
@@ -711,13 +676,12 @@ def change_track(direction: int) -> Dict[str, Any]:
 
     with lock:
         is_paused = False
-        pause_event.clear()
-        restart_event.set()
 
     if media_controller and chromecast:
         try:
             logger.info("Stopping media controller for track change")
             media_controller.stop()
+            time.sleep(0.5)  # Wait for stop to complete
             play_stream_on_chromecast()
         except Exception as e:
             logger.error(f"Error changing track: {e}")
