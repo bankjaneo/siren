@@ -111,6 +111,7 @@ def find_chromecast(device_name: Optional[str] = None) -> bool:
     global chromecast, media_controller
 
     zconf = None
+    browser = None
     try:
         logger.info(
             f"Searching for Chromecast device... (name: {device_name or DEFAULT_DEVICE})"
@@ -122,13 +123,14 @@ def find_chromecast(device_name: Optional[str] = None) -> bool:
         def add_cast_callback(uuid, service):
             """Callback for device discovery."""
             nonlocal found_device
-            device = browser.devices[uuid]
-            friendly_name = device.friendly_name
-            logger.debug(f"Discovered device: {friendly_name}")
+            device = browser.devices.get(uuid)
+            if device:
+                friendly_name = device.friendly_name
+                logger.debug(f"Discovered device: {friendly_name}")
 
-            target_name = device_name or DEFAULT_DEVICE
-            if target_name in friendly_name:
-                found_device = device
+                target_name = device_name or DEFAULT_DEVICE
+                if target_name in friendly_name and found_device is None:
+                    found_device = device
 
         listener = SimpleCastListener(add_callback=add_cast_callback)
         browser = CastBrowser(listener, zconf, known_hosts=None)
@@ -182,6 +184,11 @@ def find_chromecast(device_name: Optional[str] = None) -> bool:
         logger.error(f"Unexpected error finding Chromecast: {e}", exc_info=True)
         return False
     finally:
+        if browser:
+            try:
+                browser.stop_discovery()
+            except Exception:
+                pass
         if zconf:
             zconf.close()
 
@@ -584,25 +591,26 @@ def devices() -> Dict[str, Any]:
     try:
         zconf = create_zeroconf()
 
-        devices_list: List[Dict[str, str]] = []
+        # Use dict to deduplicate by UUID
+        devices_dict: Dict[str, Dict[str, str]] = {}
 
         def add_device_callback(uuid, service):
             """Callback for device discovery."""
-            device = browser.devices[uuid]
-            devices_list.append(
-                {
+            device = browser.devices.get(uuid)
+            if device and uuid not in devices_dict:
+                devices_dict[uuid] = {
                     "name": device.friendly_name,
                     "model": device.model_name,
                     "host": device.host,
-                    "port": device.port,
+                    "port": str(device.port),
                 }
-            )
+                logger.debug(f"Discovered device: {device.friendly_name}")
 
         listener = SimpleCastListener(add_callback=add_device_callback)
         browser = CastBrowser(listener, zconf, known_hosts=None)
-        listener.devices_list = devices_list
         browser.start_discovery()
 
+        # Wait for discovery to complete
         timeout = 5
         start_time = time.time()
         while time.time() - start_time < timeout:
@@ -610,6 +618,7 @@ def devices() -> Dict[str, Any]:
 
         browser.stop_discovery()
 
+        devices_list = list(devices_dict.values())
         logger.info(f"Found {len(devices_list)} Chromecast devices")
         return {"devices": devices_list}
     except OSError as e:
@@ -621,6 +630,11 @@ def devices() -> Dict[str, Any]:
     finally:
         if zconf:
             zconf.close()
+        if 'browser' in locals():
+            try:
+                browser.stop_discovery()
+            except Exception:
+                pass
 
 
 @app.route("/volume/<int:value>")
