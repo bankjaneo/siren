@@ -42,6 +42,7 @@ media_controller = None
 current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
 current_file_index = 0
+stream_active = False
 
 
 def get_lan_ip() -> str:
@@ -306,14 +307,15 @@ def play_stream_on_chromecast() -> bool:
 
 
 def stream_audio(file_index: int) -> Generator[bytes, None, None]:
-    """Stream a single MP3 file to Chromecast
+    """Stream MP3 files to Chromecast in a continuous loop
 
     Args:
-        file_index: Index of the file to stream
+        file_index: Starting index of the file to stream
 
     Yields:
         bytes: Audio data chunks
     """
+    global current_file_index, is_paused, stream_active
     global_mp3_files = get_mp3_files()
 
     if not global_mp3_files:
@@ -321,27 +323,46 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
         return
 
     if file_index < 0 or file_index >= len(global_mp3_files):
-        logger.warning(f"Invalid file index: {file_index}")
+        logger.warning(f"Invalid file_index: {file_index}")
         return
 
-    current_file = global_mp3_files[file_index]
-    logger.info(f"Streaming file: {current_file}")
-
-    # Typical MP3 bitrate: 128kbps = 16KB/s, use 4KB chunks every 0.25s
+    # Typical MP3 bitrate: 128kbps = 16KB/s, use 4KB chunks every 0.1s
     chunk_size = 4096
-    chunk_interval = 0.25  # seconds between chunks
-
-    try:
-        with open(current_file, "rb") as f:
-            while True:
-                data = f.read(chunk_size)
-                if not data:
-                    break
-                yield data
-                # Rate limit to simulate proper streaming
-                time.sleep(chunk_interval)
-    except Exception as e:
-        logger.warning(f"Error streaming file: {current_file}: {e}")
+    chunk_interval = 0.1  # seconds between chunks for smoother playback
+    
+    # Start from the given index and loop continuously
+    idx = file_index
+    
+    while stream_active:
+        # Check if paused before starting each file
+        if is_paused:
+            logger.info("Playback paused, waiting...")
+            while is_paused and stream_active:
+                time.sleep(0.1)
+            if not stream_active:
+                break
+            logger.info("Playback resumed")
+        
+        current_file = global_mp3_files[idx]
+        logger.info(f"Streaming file: {current_file}")
+        current_file_index = idx
+        
+        # Stream the file
+        try:
+            with open(current_file, "rb") as f:
+                while True:
+                    data = f.read(chunk_size)
+                    if not data:
+                        break
+                    yield data
+                    # Small delay to prevent blocking and allow pause check
+                    time.sleep(chunk_interval)
+        except Exception as e:
+            logger.warning(f"Error streaming file: {current_file}: {e}")
+            break
+        
+        # Move to next file, wrap around to 0 after last file
+        idx = (idx + 1) % len(global_mp3_files)
 
 
 @app.route("/stream")
@@ -397,7 +418,7 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
     Returns:
         Dict: Status and message
     """
-    global is_paused, chromecast, media_controller, current_file_index
+    global is_paused, chromecast, media_controller, current_file_index, stream_active
 
     # Connect if not already connected
     if chromecast is None:
@@ -409,12 +430,13 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
 
     with lock:
         # Prevent duplicate play requests
-        if not is_paused:
+        if not is_paused and stream_active:
             logger.info("Playback already in progress, ignoring duplicate play request")
             return {"status": "playing", "message": "Already playing"}
         
         is_paused = False
         current_file_index = 0
+        stream_active = True
 
     # Stop current playback
     if media_controller and chromecast:
@@ -451,18 +473,19 @@ def pause() -> Dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused
+    global is_paused, stream_active
 
     logger.info("Pause requested")
 
     with lock:
         is_paused = True
+        stream_active = False
 
-    # Pause the media player on Chromecast
+    # Stop the media player on Chromecast
     if media_controller and chromecast:
         try:
-            logger.info("Pausing media controller")
-            media_controller.pause()
+            logger.info("Stopping media controller")
+            media_controller.stop()
         except Exception as e:
             logger.error(f"Error pausing media controller: {e}")
 
@@ -476,32 +499,50 @@ def resume() -> Dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused, current_file_index
+    global is_paused, stream_active
 
     logger.info("Resume requested")
 
     with lock:
         is_paused = False
+        stream_active = True
 
-    # Resume the media player on Chromecast
+    # Restart the stream from current file index
     if media_controller and chromecast:
         try:
-            status = media_controller.status
-            if status and status.player_state != "PLAYING":
-                # Check if there's an active session
-                if status.player_state in ("IDLE", "UNKNOWN"):
-                    # No active session, need to restart playback from current file
-                    logger.info(f"No active session, restarting from file {current_file_index}")
-                    play_stream_on_chromecast()
-                else:
-                    logger.info("Resuming media controller")
-                    media_controller.play()
-            else:
-                logger.info("Media already playing")
+            logger.info("Restarting stream from current file")
+            play_stream_on_chromecast()
         except Exception as e:
-            logger.error(f"Error resuming media controller: {e}")
+            logger.error(f"Error resuming stream: {e}")
 
     return {"status": "resumed"}
+
+
+@app.route("/stop")
+def stop() -> Dict[str, str]:
+    """Stop the audio stream
+
+    Returns:
+        Dict: Status
+    """
+    global is_paused, stream_active, current_file_index
+
+    logger.info("Stop requested")
+
+    with lock:
+        is_paused = True
+        stream_active = False
+        current_file_index = 0
+
+    # Stop the media player on Chromecast
+    if media_controller and chromecast:
+        try:
+            logger.info("Stopping media controller")
+            media_controller.stop()
+        except Exception as e:
+            logger.error(f"Error stopping media controller: {e}")
+
+    return {"status": "stopped"}
 
 
 @app.route("/status")
