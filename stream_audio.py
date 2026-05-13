@@ -547,9 +547,10 @@ def status() -> Dict[str, Any]:
         "is_paused": is_paused,
         "files_count": len(mp3_files_list),
         "chromecast_connected": chromecast is not None,
-        "selected_device": chromecast.name if chromecast else None,
+        "selected_device": chromecast.cast_info.friendly_name if chromecast else None,
         "current_file_index": current_file_index,
         "current_file": mp3_files_list[current_file_index] if mp3_files_list else None,
+        "current_volume": current_volume,
     }
 
 
