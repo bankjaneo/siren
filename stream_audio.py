@@ -194,6 +194,43 @@ def find_chromecast(device_name: Optional[str] = None) -> bool:
             zconf.close()
 
 
+def disconnect_chromecast() -> bool:
+    """Disconnect from the current Chromecast device
+
+    Returns:
+        bool: True if successful, False otherwise
+    """
+    global chromecast, media_controller, is_paused, stream_active, current_file_index
+
+    if chromecast is None:
+        logger.warning("Cannot disconnect: No Chromecast connected")
+        return False
+
+    # Stop playback before disconnecting
+    if media_controller:
+        try:
+            logger.info("Stopping media controller before disconnect")
+            media_controller.stop()
+        except Exception as e:
+            logger.error(f"Error stopping media controller: {e}")
+
+    try:
+        logger.info("Disconnecting from Chromecast...")
+        chromecast.disconnect(timeout=2.0)
+        logger.info("Successfully disconnected from Chromecast")
+    except Exception as e:
+        logger.error(f"Error disconnecting from Chromecast: {e}")
+
+    # Reset global state
+    chromecast = None
+    media_controller = None
+    is_paused = True
+    stream_active = False
+    current_file_index = 0
+
+    return True
+
+
 def require_chromecast_connected(func):
     """Decorator to check if Chromecast is connected before executing route handler
 
@@ -489,18 +526,25 @@ def resume() -> Dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused
+    global is_paused, stream_active
 
     logger.info("Resume requested")
 
     with lock:
         is_paused = False
+        stream_active = True
 
-    # Resume the media player on Chromecast (continues from paused position)
+    # Check if resuming from paused state or stopped state
     if media_controller and chromecast:
         try:
-            logger.info("Resuming media controller")
-            media_controller.play()
+            # If media is paused (not stopped), resume from paused position
+            if media_controller.status and media_controller.status.player_state == "PAUSED":
+                logger.info("Resuming media controller from paused state")
+                media_controller.play()
+            else:
+                # Media is stopped, need to restart playback from beginning
+                logger.info("Media is stopped, restarting playback from beginning")
+                play_stream_on_chromecast()
         except Exception as e:
             logger.error(f"Error resuming stream: {e}")
 
@@ -609,6 +653,20 @@ def connect(device_name: Optional[str] = None) -> Dict[str, Any]:
                 "volume": current_volume,
             }
         return {"status": "failed", "message": "Could not find Chromecast device"}
+
+
+@app.route("/disconnect")
+def disconnect() -> Dict[str, str]:
+    """Disconnect from current Chromecast device
+
+    Returns:
+        Dict: Disconnection status
+    """
+    logger.info("Disconnect request received")
+    with lock:
+        if disconnect_chromecast():
+            return {"status": "disconnected"}
+        return {"status": "failed", "message": "No Chromecast device connected"}
 
 
 @app.route("/devices")
@@ -757,6 +815,8 @@ if __name__ == "__main__":
     print("  /play/:device_name - Start playback on specific device")
     print("  /pause - Pause playback")
     print("  /resume - Resume playback")
+    print("  /stop - Stop playback")
+    print("  /disconnect - Disconnect from Chromecast device")
     print("  /status - Get current status")
     print("  /previous - Play previous file")
     print("  /next - Play next file")
