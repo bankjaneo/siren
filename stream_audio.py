@@ -263,6 +263,7 @@ def require_chromecast_connected(func):
     Returns:
         Wrapped function with chromecast connection check
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         if chromecast is None:
@@ -282,6 +283,7 @@ def require_mp3_files(func):
     Returns:
         Wrapped function with MP3 files check
     """
+
     @wraps(func)
     def wrapper(*args, **kwargs):
         mp3_files_list = get_mp3_files()
@@ -399,15 +401,15 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
     # Typical MP3 bitrate: 128kbps = 16KB/s, use 4KB chunks every 0.1s
     chunk_size = 4096
     chunk_interval = 0.1  # seconds between chunks for smoother playback
-    
+
     # Start from the given index and loop continuously
     idx = file_index
-    
+
     while stream_active:
         current_file = global_mp3_files[idx]
         logger.info(f"Streaming file: {current_file}")
         current_file_index = idx
-        
+
         # Stream the file
         try:
             with open(current_file, "rb") as f:
@@ -421,7 +423,7 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
         except Exception as e:
             logger.warning(f"Error streaming file: {current_file}: {e}")
             break
-        
+
         # Move to next file, wrap around to 0 after last file
         idx = (idx + 1) % len(global_mp3_files)
 
@@ -493,7 +495,7 @@ def play(device_name: str | None = None) -> dict[str, Any]:
         if not is_paused and stream_active:
             logger.info("Playback already in progress, ignoring duplicate play request")
             return {"status": "playing", "message": "Already playing"}
-        
+
         is_paused = False
         current_file_index = 0
         stream_active = True
@@ -565,7 +567,10 @@ def resume() -> dict[str, str]:
     if media_controller and chromecast:
         try:
             # If media is paused (not stopped), resume from paused position
-            if media_controller.status and media_controller.status.player_state == "PAUSED":
+            if (
+                media_controller.status
+                and media_controller.status.player_state == "PAUSED"
+            ):
                 logger.info("Resuming media controller from paused state")
                 media_controller.play()
             else:
