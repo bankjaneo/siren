@@ -1,19 +1,21 @@
 #!/usr/bin/env python3
 """Google Cast Audio Streamer - Flask application for streaming MP3 files to Chromecast devices"""
 
-import os
-import time
-import threading
 import logging
+import os
 import socket
+import threading
+import time
+from collections.abc import Generator
 from functools import wraps
-from typing import Optional, List, Dict, Generator, Any
+from typing import Any
+
+import pychromecast
 from flask import Flask, Response, render_template, send_from_directory
 from flask_cors import CORS
-import pychromecast
-from pychromecast import CastBrowser, get_chromecast_from_host
-from pychromecast.discovery import AbstractCastListener, SimpleCastListener
-from zeroconf import Zeroconf, InterfaceChoice
+from pychromecast import CastBrowser
+from pychromecast.discovery import SimpleCastListener
+from zeroconf import InterfaceChoice, Zeroconf
 
 # Configure logging with timestamps and context
 logging.basicConfig(
@@ -62,7 +64,7 @@ def get_lan_ip() -> str:
         return "localhost"
 
 
-def get_mp3_files() -> List[str]:
+def get_mp3_files() -> list[str]:
     """Get all MP3 files from the music folder
 
     Returns:
@@ -100,7 +102,47 @@ def create_zeroconf() -> Zeroconf:
             raise
 
 
-def find_chromecast(device_name: Optional[str] = None) -> bool:
+def run_discovery(handle_device, stop_when=None):
+    """Run Chromecast discovery with timeout and cleanup.
+
+    Args:
+        handle_device: Callback invoked as (browser, uuid, service) for each device
+        stop_when: Optional callable returning True to stop discovery early
+
+    Returns:
+        CastBrowser: Browser after discovery, or None on OSError
+    """
+    zconf = None
+    browser = None
+    try:
+        zconf = create_zeroconf()
+        listener = SimpleCastListener(
+            add_callback=lambda uuid, service: handle_device(browser, uuid, service)
+        )
+        browser = CastBrowser(listener, zconf, known_hosts=None)
+        browser.start_discovery()
+
+        timeout = 5
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if stop_when and stop_when():
+                break
+            time.sleep(0.1)
+        return browser
+    except OSError as e:
+        logger.error(f"Error during Chromecast discovery: {e}")
+        return None
+    finally:
+        if browser:
+            try:
+                browser.stop_discovery()
+            except Exception:
+                pass
+        if zconf:
+            zconf.close()
+
+
+def find_chromecast(device_name: str | None = None) -> bool:
     """Find and connect to Chromecast device
 
     Args:
@@ -111,40 +153,29 @@ def find_chromecast(device_name: Optional[str] = None) -> bool:
     """
     global chromecast, media_controller
 
-    zconf = None
-    browser = None
+    logger.info(
+        f"Searching for Chromecast device... (name: {device_name or DEFAULT_DEVICE})"
+    )
+
+    found_device = None
+    target_name = device_name or DEFAULT_DEVICE
+
+    def add_cast_callback(browser, uuid, service):
+        """Callback for device discovery."""
+        nonlocal found_device
+        device = browser.devices.get(uuid)
+        if device:
+            friendly_name = device.friendly_name
+            logger.debug(f"Discovered device: {friendly_name}")
+            if target_name in friendly_name and found_device is None:
+                found_device = device
+
     try:
-        logger.info(
-            f"Searching for Chromecast device... (name: {device_name or DEFAULT_DEVICE})"
+        browser = run_discovery(
+            add_cast_callback, stop_when=lambda: found_device is not None
         )
-        zconf = create_zeroconf()
-
-        found_device = None
-
-        def add_cast_callback(uuid, service):
-            """Callback for device discovery."""
-            nonlocal found_device
-            device = browser.devices.get(uuid)
-            if device:
-                friendly_name = device.friendly_name
-                logger.debug(f"Discovered device: {friendly_name}")
-
-                target_name = device_name or DEFAULT_DEVICE
-                if target_name in friendly_name and found_device is None:
-                    found_device = device
-
-        listener = SimpleCastListener(add_callback=add_cast_callback)
-        browser = CastBrowser(listener, zconf, known_hosts=None)
-        browser.start_discovery()
-
-        timeout = 5
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            if found_device:
-                break
-            time.sleep(0.1)
-
-        browser.stop_discovery()
+        if browser is None:
+            return False
 
         if not found_device:
             logger.warning(
@@ -181,17 +212,9 @@ def find_chromecast(device_name: Optional[str] = None) -> bool:
     except OSError as e:
         logger.error(f"Error during Chromecast discovery: {e}")
         return False
-    except Exception as e:
-        logger.error(f"Unexpected error finding Chromecast: {e}", exc_info=True)
+    except Exception:
+        logger.exception("Unexpected error finding Chromecast")
         return False
-    finally:
-        if browser:
-            try:
-                browser.stop_discovery()
-            except Exception:
-                pass
-        if zconf:
-            zconf.close()
 
 
 def disconnect_chromecast() -> bool:
@@ -240,8 +263,6 @@ def require_chromecast_connected(func):
     Returns:
         Wrapped function with chromecast connection check
     """
-    from functools import wraps
-
     @wraps(func)
     def wrapper(*args, **kwargs):
         if chromecast is None:
@@ -261,8 +282,6 @@ def require_mp3_files(func):
     Returns:
         Wrapped function with MP3 files check
     """
-    from functools import wraps
-
     @wraps(func)
     def wrapper(*args, **kwargs):
         mp3_files_list = get_mp3_files()
@@ -314,6 +333,20 @@ def set_volume(volume_percent: int, retries: int = 5, delay: float = 1) -> bool:
                 return False
 
     return False
+
+
+def stop_media_controller() -> None:
+    """Stop the media controller if a Chromecast is connected
+
+    Returns:
+        None
+    """
+    if media_controller and chromecast:
+        try:
+            logger.info("Stopping media controller")
+            media_controller.stop()
+        except Exception as e:
+            logger.error(f"Error stopping media controller: {e}")
 
 
 def play_stream_on_chromecast() -> bool:
@@ -437,7 +470,7 @@ def favicon() -> str:
 @app.route("/play")
 @app.route("/play/<device_name>")
 @require_mp3_files
-def play(device_name: Optional[str] = None) -> Dict[str, Any]:
+def play(device_name: str | None = None) -> dict[str, Any]:
     """Start the audio stream
 
     Args:
@@ -449,12 +482,11 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
     global is_paused, chromecast, media_controller, current_file_index, stream_active
 
     # Connect if not already connected
-    if chromecast is None:
-        if not find_chromecast(device_name):
-            logger.error(
-                f"Failed to connect to Chromecast: {device_name or DEFAULT_DEVICE}"
-            )
-            return {"status": "failed", "message": "Could not find Chromecast device"}
+    if chromecast is None and not find_chromecast(device_name):
+        logger.error(
+            f"Failed to connect to Chromecast: {device_name or DEFAULT_DEVICE}"
+        )
+        return {"status": "failed", "message": "Could not find Chromecast device"}
 
     with lock:
         # Prevent duplicate play requests
@@ -467,12 +499,7 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
         stream_active = True
 
     # Stop current playback
-    if media_controller and chromecast:
-        try:
-            logger.info("Stopping current playback")
-            media_controller.stop()
-        except Exception:
-            pass
+    stop_media_controller()
 
     mp3_files_list = get_mp3_files()
 
@@ -495,7 +522,7 @@ def play(device_name: Optional[str] = None) -> Dict[str, Any]:
 
 
 @app.route("/pause")
-def pause() -> Dict[str, str]:
+def pause() -> dict[str, str]:
     """Pause the audio stream
 
     Returns:
@@ -520,7 +547,7 @@ def pause() -> Dict[str, str]:
 
 
 @app.route("/resume")
-def resume() -> Dict[str, str]:
+def resume() -> dict[str, str]:
     """Resume the audio stream
 
     Returns:
@@ -552,7 +579,7 @@ def resume() -> Dict[str, str]:
 
 
 @app.route("/stop")
-def stop() -> Dict[str, str]:
+def stop() -> dict[str, str]:
     """Stop the audio stream
 
     Returns:
@@ -568,18 +595,13 @@ def stop() -> Dict[str, str]:
         current_file_index = 0
 
     # Stop the media player on Chromecast
-    if media_controller and chromecast:
-        try:
-            logger.info("Stopping media controller")
-            media_controller.stop()
-        except Exception as e:
-            logger.error(f"Error stopping media controller: {e}")
+    stop_media_controller()
 
     return {"status": "stopped"}
 
 
 @app.route("/status")
-def status() -> Dict[str, Any]:
+def status() -> dict[str, Any]:
     """Get current status
 
     Returns:
@@ -599,7 +621,7 @@ def status() -> Dict[str, Any]:
 
 
 @app.route("/files")
-def files() -> Dict[str, Any]:
+def files() -> dict[str, Any]:
     """Get list of MP3 files
 
     Returns:
@@ -613,7 +635,7 @@ def files() -> Dict[str, Any]:
 
 @app.route("/previous")
 @require_mp3_files
-def previous() -> Dict[str, Any]:
+def previous() -> dict[str, Any]:
     """Play previous file in the playlist
 
     Returns:
@@ -624,7 +646,7 @@ def previous() -> Dict[str, Any]:
 
 @app.route("/next")
 @require_mp3_files
-def next() -> Dict[str, Any]:
+def next() -> dict[str, Any]:
     """Play next file in the playlist
 
     Returns:
@@ -635,7 +657,7 @@ def next() -> Dict[str, Any]:
 
 @app.route("/connect")
 @app.route("/connect/<device_name>")
-def connect(device_name: Optional[str] = None) -> Dict[str, Any]:
+def connect(device_name: str | None = None) -> dict[str, Any]:
     """Connect to Chromecast device
 
     Args:
@@ -656,7 +678,7 @@ def connect(device_name: Optional[str] = None) -> Dict[str, Any]:
 
 
 @app.route("/disconnect")
-def disconnect() -> Dict[str, str]:
+def disconnect() -> dict[str, str]:
     """Disconnect from current Chromecast device
 
     Returns:
@@ -670,65 +692,41 @@ def disconnect() -> Dict[str, str]:
 
 
 @app.route("/devices")
-def devices() -> Dict[str, Any]:
+def devices() -> dict[str, Any]:
     """List available Chromecast devices
 
     Returns:
         Dict: List of devices or error
     """
-    zconf = None
-    try:
-        zconf = create_zeroconf()
+    # Use dict to deduplicate by UUID
+    devices_dict: dict[str, dict[str, str]] = {}
 
-        # Use dict to deduplicate by UUID
-        devices_dict: Dict[str, Dict[str, str]] = {}
+    def add_device_callback(browser, uuid, service):
+        """Callback for device discovery."""
+        device = browser.devices.get(uuid)
+        if device and uuid not in devices_dict:
+            devices_dict[uuid] = {
+                "name": device.friendly_name,
+                "model": device.model_name,
+                "host": device.host,
+                "port": str(device.port),
+            }
+            logger.debug(f"Discovered device: {device.friendly_name}")
 
-        def add_device_callback(uuid, service):
-            """Callback for device discovery."""
-            device = browser.devices.get(uuid)
-            if device and uuid not in devices_dict:
-                devices_dict[uuid] = {
-                    "name": device.friendly_name,
-                    "model": device.model_name,
-                    "host": device.host,
-                    "port": str(device.port),
-                }
-                logger.debug(f"Discovered device: {device.friendly_name}")
-
-        listener = SimpleCastListener(add_callback=add_device_callback)
-        browser = CastBrowser(listener, zconf, known_hosts=None)
-        browser.start_discovery()
-
-        # Wait for discovery to complete
-        timeout = 5
-        start_time = time.time()
-        while time.time() - start_time < timeout:
-            time.sleep(0.1)
-
-        browser.stop_discovery()
-
-        devices_list = list(devices_dict.values())
-        logger.info(f"Found {len(devices_list)} Chromecast devices")
-        return {"devices": devices_list}
-    except OSError as e:
-        logger.error(f"Error discovering Chromecast devices: {e}")
+    if run_discovery(add_device_callback) is None:
         return {
             "devices": [],
             "error": "Device discovery failed - network buffer issue",
         }
-    finally:
-        if zconf:
-            zconf.close()
-        if 'browser' in locals():
-            try:
-                browser.stop_discovery()
-            except Exception:
-                pass
+
+    devices_list = list(devices_dict.values())
+    logger.info(f"Found {len(devices_list)} Chromecast devices")
+    return {"devices": devices_list}
 
 
 @app.route("/volume/<int:value>")
 @require_chromecast_connected
-def volume(value: int) -> Dict[str, Any]:
+def volume(value: int) -> dict[str, Any]:
     """Set volume of connected Chromecast
 
     Args:
@@ -755,7 +753,7 @@ def volume(value: int) -> Dict[str, Any]:
         return {"status": "failed", "message": "Error setting volume"}
 
 
-def change_track(direction: int) -> Dict[str, Any]:
+def change_track(direction: int) -> dict[str, Any]:
     """Play previous or next file in the playlist
 
     Args:
@@ -782,8 +780,7 @@ def change_track(direction: int) -> Dict[str, Any]:
 
     if media_controller and chromecast:
         try:
-            logger.info("Stopping media controller for track change")
-            media_controller.stop()
+            stop_media_controller()
             time.sleep(0.5)  # Wait for stop to complete
             play_stream_on_chromecast()
         except Exception as e:
@@ -792,7 +789,7 @@ def change_track(direction: int) -> Dict[str, Any]:
 
 
 @app.route("/config")
-def config() -> Dict[str, Any]:
+def config() -> dict[str, Any]:
     """Get application configuration
 
     Returns:
