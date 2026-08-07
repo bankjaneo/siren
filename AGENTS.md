@@ -28,10 +28,10 @@ pytest tests/ --cov=.
 
 ### Code Quality
 ```bash
-# Lint code (if ruff is configured)
+# Lint code
 ruff check stream_audio.py
 
-# Format code (if ruff is configured)
+# Format code
 ruff format stream_audio.py
 
 # Type checking (if mypy is configured)
@@ -41,27 +41,36 @@ mypy stream_audio.py
 ## Code Style Guidelines
 
 ### Python Version and Dependencies
-- Use Python 3.x
+- Use Python 3.11+
 - Flask 3.0.0 for web framework
 - pychromecast 14.0.9 for Chromecast control
 - zeroconf 0.135.0 for service discovery
 - flask-cors 4.0.0 for CORS support
 
 ### Import Organization
-1. Standard library modules (os, time, threading, logging, socket)
-2. Third-party packages (Flask, pychromecast, flask-cors)
+1. Standard library modules (logging, os, socket, threading, time)
+2. Third-party packages (flask, flask_cors, pychromecast, zeroconf)
 3. Local modules (none in this project)
+
+Imports are sorted alphabetically by ruff (isort), with a blank line separating stdlib from third-party.
 
 Example:
 ```python
-import os
-import time
-import threading
 import logging
-from flask import Flask, Response, request, render_template
+import os
+import socket
+import threading
+import time
+from collections.abc import Generator
+from functools import wraps
+from typing import Any
+
+import pychromecast
+from flask import Flask, Response, render_template
 from flask_cors import CORS
-from pychromecast import get_chromecasts
-from pychromecast.controllers.media import MediaController
+from pychromecast import CastBrowser
+from pychromecast.discovery import SimpleCastListener
+from zeroconf import InterfaceChoice, Zeroconf
 ```
 
 ### Naming Conventions
@@ -72,7 +81,7 @@ from pychromecast.controllers.media import MediaController
 
 ### Code Structure
 1. Module-level constants and global variables
-2. Helper functions (get_mp3_files, find_chromecast, set_volume, stream_audio)
+2. Helper functions (get_mp3_files, run_discovery, find_chromecast, set_volume, stream_audio, etc.)
 3. Flask route handlers (stream_audio_endpoint, index, play, pause, etc.)
 4. Main execution block
 
@@ -137,9 +146,9 @@ except Exception:
 - Suppress development server warnings
 - Use appropriate log levels
 
-### Type Hints (Optional)
-- Consider adding type hints for better code clarity
-- Not currently used but recommended for future improvements
+### Type Hints
+- Type hints are used for function parameters and return values
+- Use modern annotations (`list[str]`, `dict[str, ...]`, `str | None`)
 
 ### Testing Guidelines
 - Write tests for all route handlers
