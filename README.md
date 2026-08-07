@@ -68,8 +68,8 @@ Navigate to `http://localhost:5067` in your browser for the web UI.
 
 | Endpoint | Description | Example |
 |----------|-------------|---------|
-| `GET /play` | Start streaming to default device (auto-selects Bedroom speaker) | `curl http://localhost:5067/play` |
-| `GET /play/DeviceName` | Start streaming to specific Chromecast device | `curl http://localhost:5067/play/Bedroom%20speaker` |
+| `GET /play` | Start streaming to default device (auto-selects Google Nest Mini) | `curl http://localhost:5067/play` |
+| `GET /play/DeviceName` | Start streaming to specific Chromecast device | `curl http://localhost:5067/play/Google%20Nest%20Mini` |
 | `GET /pause` | Stop streaming and pause playback | `curl http://localhost:5067/pause` |
 | `GET /resume` | Resume playback from paused state | `curl http://localhost:5067/resume` |
 | `GET /stop` | Stop the audio stream | `curl http://localhost:5067/stop` |
@@ -77,7 +77,7 @@ Navigate to `http://localhost:5067` in your browser for the web UI.
 | `GET /previous` | Play previous file in playlist | `curl http://localhost:5067/previous` |
 | `GET /next` | Play next file in playlist | `curl http://localhost:5067/next` |
 | `GET /connect` | Connect to default Chromecast device | `curl http://localhost:5067/connect` |
-| `GET /connect/DeviceName` | Connect to specific Chromecast device | `curl http://localhost:5067/connect/Bedroom%20speaker` |
+| `GET /connect/DeviceName` | Connect to specific Chromecast device | `curl http://localhost:5067/connect/Google%20Nest%20Mini` |
 | `GET /disconnect` | Disconnect from the current Chromecast device | `curl http://localhost:5067/disconnect` |
 | `GET /devices` | List all available Chromecast devices | `curl http://localhost:5067/devices` |
 | `GET /volume/{level}` | Set volume level (1-100) | `curl http://localhost:5067/volume/75` |
@@ -89,7 +89,7 @@ Navigate to `http://localhost:5067` in your browser for the web UI.
 1. Start the server: `./start.sh` or `docker-compose up -d`
 2. List available devices: `curl http://localhost:5067/devices`
 3. Navigate to `http://localhost:5067` in your browser
-4. Use `/play` to start the continuous loop (auto-selects Bedroom speaker)
+4. Use `/play` to start the continuous loop (auto-selects Google Nest Mini)
 5. Or use `/play/DeviceName` to specify which device to play on
 
 ### Volume Control
@@ -107,7 +107,7 @@ The following variables can be customized via environment variables or in `strea
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `MUSIC_FOLDER` | `"music/"` | Folder containing MP3 files to stream |
-| `DEFAULT_DEVICE` | `"Bedroom speaker"` | Default Chromecast device name |
+| `DEFAULT_DEVICE` | `"Google Nest Mini"` | Default Chromecast device name |
 | `PORT` | `5067` | Server port number |
 | `LOOP_DELAY` | `0.1` | Delay between file reads (seconds) |
 | `DEFAULT_VOLUME` | `5` | Default volume level (1-100) |
@@ -131,7 +131,7 @@ For local development, edit `stream_audio.py` directly:
 
 ## Notes
 
-- The server automatically discovers and connects to the default device (Bedroom speaker)
+- The server automatically discovers and connects to the default device (Google Nest Mini)
 - No need for Google Home app - direct Chromecast control
 - Multiple MP3 files in the `music/` folder will loop automatically
 - Use the pause/resume endpoints to control playback

@@ -32,7 +32,7 @@ CORS(app)
 
 # Environment configuration
 MUSIC_FOLDER = os.environ.get("MUSIC_FOLDER", "music/")
-DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "Bedroom speaker")
+DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "Google Nest Mini")
 PORT = int(os.environ.get("PORT", "5067"))
 LOOP_DELAY = float(os.environ.get("LOOP_DELAY", "0.1"))
 DEFAULT_VOLUME = int(os.environ.get("DEFAULT_VOLUME", "5"))

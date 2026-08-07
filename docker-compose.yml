@@ -10,7 +10,7 @@ services:
     restart: unless-stopped
     environment:
       - MUSIC_FOLDER=${MUSIC_FOLDER:-music/}
-      - DEFAULT_DEVICE=${DEFAULT_DEVICE:-Bedroom speaker}
+      - DEFAULT_DEVICE=${DEFAULT_DEVICE:-Google Nest Mini}
       - PORT=${PORT:-5067}
       - LOOP_DELAY=${LOOP_DELAY:-0.1}
       - DEFAULT_VOLUME=${DEFAULT_VOLUME:-5}
