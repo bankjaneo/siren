@@ -36,6 +36,8 @@ DEFAULT_DEVICE = os.environ.get("DEFAULT_DEVICE", "Google Nest Mini")
 PORT = int(os.environ.get("PORT", "5067"))
 LOOP_DELAY = float(os.environ.get("LOOP_DELAY", "0.1"))
 DEFAULT_VOLUME = int(os.environ.get("DEFAULT_VOLUME", "5"))
+RECONNECT_DELAY = float(os.environ.get("RECONNECT_DELAY", "2"))
+RECONNECT_ATTEMPTS = int(os.environ.get("RECONNECT_ATTEMPTS", "60"))
 
 # Global state variables (thread-safe)
 is_paused = True
@@ -45,6 +47,31 @@ current_volume = DEFAULT_VOLUME
 lock = threading.Lock()
 current_file_index = 0
 stream_active = False
+connection_lost = False
+reconnect_running = False
+target_device_name = DEFAULT_DEVICE
+
+
+class ConnectionListener:
+    """Listener for Chromecast socket connection status changes.
+
+    Detects when the speaker briefly drops off the network and triggers an
+    automatic reconnect while playback is intended to be active.
+    """
+
+    def new_connection_status(self, status) -> None:
+        """Handle connection status updates from the Chromecast socket.
+
+        Args:
+            status: ConnectionStatus object with a .status attribute
+                (CONNECTED, DISCONNECTED, or FAILED)
+
+        Returns:
+            None
+        """
+        if status.status in ("DISCONNECTED", "FAILED"):
+            logger.info("Connection to speaker lost, scheduling reconnect")
+            start_reconnect()
 
 
 def get_lan_ip() -> str:
@@ -151,7 +178,7 @@ def find_chromecast(device_name: str | None = None) -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    global chromecast, media_controller
+    global chromecast, media_controller, target_device_name
 
     logger.info(
         f"Searching for Chromecast device... (name: {device_name or DEFAULT_DEVICE})"
@@ -159,6 +186,7 @@ def find_chromecast(device_name: str | None = None) -> bool:
 
     found_device = None
     target_name = device_name or DEFAULT_DEVICE
+    target_device_name = target_name
 
     def add_cast_callback(browser, uuid, service):
         """Callback for device discovery."""
@@ -201,6 +229,9 @@ def find_chromecast(device_name: str | None = None) -> bool:
         # Use the built-in media controller
         media_controller = chromecast.media_controller
 
+        # Watch for socket drops to trigger automatic reconnect
+        chromecast.register_connection_listener(ConnectionListener())
+
         # Set volume with retry
         if set_volume(current_volume):
             logger.info(f"Chromecast connected successfully, volume: {current_volume}%")
@@ -223,7 +254,13 @@ def disconnect_chromecast() -> bool:
     Returns:
         bool: True if successful, False otherwise
     """
-    global chromecast, media_controller, is_paused, stream_active, current_file_index
+    global \
+        chromecast, \
+        media_controller, \
+        is_paused, \
+        stream_active, \
+        current_file_index, \
+        connection_lost
 
     if chromecast is None:
         logger.warning("Cannot disconnect: No Chromecast connected")
@@ -250,6 +287,7 @@ def disconnect_chromecast() -> bool:
     is_paused = True
     stream_active = False
     current_file_index = 0
+    connection_lost = False
 
     return True
 
@@ -378,6 +416,104 @@ def play_stream_on_chromecast() -> bool:
         return False
 
 
+def start_reconnect() -> None:
+    """Schedule a background reconnect if playback is meant to be active.
+
+    Spawns a single daemon thread that reconnects to the speaker and resumes
+    playback from the current file. Prevents duplicate threads from running.
+
+    Returns:
+        None
+    """
+    global connection_lost, reconnect_running
+
+    with lock:
+        if not stream_active or is_paused:
+            return
+        if reconnect_running:
+            return
+        connection_lost = True
+        reconnect_running = True
+
+    thread = threading.Thread(target=reconnect_loop, daemon=True)
+    thread.start()
+    logger.info("Reconnect thread started")
+
+
+def reconnect_loop() -> None:
+    """Reconnect to the speaker and resume playback from the current file.
+
+    Retries find + play until the speaker is back and playing, the playback
+    is explicitly stopped/paused, or the attempt budget is exhausted.
+
+    Returns:
+        None
+    """
+    global connection_lost, reconnect_running, stream_active, is_paused
+
+    try:
+        for attempt in range(RECONNECT_ATTEMPTS):
+            with lock:
+                if not stream_active or is_paused:
+                    logger.info("Playback no longer active, cancelling reconnect")
+                    connection_lost = False
+                    return
+                if not connection_lost:
+                    return
+
+            logger.debug(f"Reconnect attempt {attempt + 1}/{RECONNECT_ATTEMPTS}")
+            time.sleep(RECONNECT_DELAY)
+
+            with lock:
+                if not stream_active or is_paused:
+                    connection_lost = False
+                    return
+
+            if not find_chromecast(target_device_name):
+                logger.debug("Speaker not found yet, retrying")
+                continue
+
+            # Re-check before issuing playback in case the user paused/stopped
+            # while find_chromecast was blocking.
+            with lock:
+                if not stream_active or is_paused or not connection_lost:
+                    logger.info("Playback no longer active, cancelling reconnect")
+                    connection_lost = False
+                    return
+
+            stop_media_controller()
+            if not play_stream_on_chromecast():
+                logger.debug("Playback start failed, retrying")
+                continue
+
+            # Wait briefly for playback to start
+            timeout = 15
+            start_time = time.time()
+            while time.time() - start_time < timeout:
+                with lock:
+                    if not stream_active or is_paused:
+                        connection_lost = False
+                        return
+                try:
+                    status = media_controller.status
+                    if status.player_state == "PLAYING":
+                        logger.info("Playback resumed after reconnect")
+                        connection_lost = False
+                        return
+                except Exception:
+                    break
+                time.sleep(1)
+
+        logger.error(f"Giving up reconnect after {RECONNECT_ATTEMPTS} attempts")
+        connection_lost = False
+        stream_active = False
+        is_paused = True
+    finally:
+        with lock:
+            reconnect_running = False
+        logger.info("Reconnect thread finished")
+
+
 def stream_audio(file_index: int) -> Generator[bytes, None, None]:
     """Stream MP3 files to Chromecast in a continuous loop
 
@@ -481,7 +617,13 @@ def play(device_name: str | None = None) -> dict[str, Any]:
     Returns:
         Dict: Status and message
     """
-    global is_paused, chromecast, media_controller, current_file_index, stream_active
+    global \
+        is_paused, \
+        chromecast, \
+        media_controller, \
+        current_file_index, \
+        stream_active, \
+        connection_lost
 
     # Connect if not already connected
     if chromecast is None and not find_chromecast(device_name):
@@ -499,6 +641,7 @@ def play(device_name: str | None = None) -> dict[str, Any]:
         is_paused = False
         current_file_index = 0
         stream_active = True
+        connection_lost = False
 
     # Stop current playback
     stop_media_controller()
@@ -530,13 +673,13 @@ def pause() -> dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused
+    global is_paused, connection_lost
 
     logger.info("Pause requested")
 
     with lock:
         is_paused = True
-
+        connection_lost = False
     # Pause the media player on Chromecast (preserves position)
     if media_controller and chromecast:
         try:
@@ -555,13 +698,18 @@ def resume() -> dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused, stream_active
+    global is_paused, stream_active, connection_lost
 
     logger.info("Resume requested")
 
     with lock:
         is_paused = False
         stream_active = True
+
+    # If the connection was lost, the reconnect thread will restore playback
+    if connection_lost:
+        logger.info("Connection was lost, deferring resume to reconnect thread")
+        return {"status": "resumed"}
 
     # Check if resuming from paused state or stopped state
     if media_controller and chromecast:
@@ -590,7 +738,7 @@ def stop() -> dict[str, str]:
     Returns:
         Dict: Status
     """
-    global is_paused, stream_active, current_file_index
+    global is_paused, stream_active, current_file_index, connection_lost
 
     logger.info("Stop requested")
 
@@ -598,6 +746,7 @@ def stop() -> dict[str, str]:
         is_paused = True
         stream_active = False
         current_file_index = 0
+        connection_lost = False
 
     # Stop the media player on Chromecast
     stop_media_controller()
