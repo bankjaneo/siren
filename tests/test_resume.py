@@ -289,3 +289,72 @@ def test_pause_clears_connection_lost(monkeypatch):
     assert response.status_code == 200
     assert stream_audio.connection_lost is False
     assert stream_audio.is_paused is True
+
+
+def test_watchdog_poll_healthy_state_returns_zero(monkeypatch):
+    reset_state()
+    stream_audio.stream_active = True
+    stream_audio.is_paused = False
+    stream_audio.chromecast = mock.Mock()
+    stream_audio.chromecast.status.app_id = "CC1AD845"
+    stream_audio.media_controller = FakeMediaController("PLAYING")
+
+    restarted = []
+    monkeypatch.setattr(
+        stream_audio, "play_stream_on_chromecast", lambda: restarted.append(True)
+    )
+
+    assert stream_audio.watchdog_poll(0) == 0
+    assert restarted == []
+
+
+def test_watchdog_poll_restarts_after_two_bad_polls(monkeypatch):
+    reset_state()
+    stream_audio.stream_active = True
+    stream_audio.is_paused = False
+    stream_audio.chromecast = mock.Mock()
+    stream_audio.chromecast.status.app_id = "CC1AD845"
+    stream_audio.media_controller = FakeMediaController("IDLE")
+
+    restarted = []
+    monkeypatch.setattr(
+        stream_audio, "play_stream_on_chromecast", lambda: restarted.append(True)
+    )
+
+    assert stream_audio.watchdog_poll(0) == 1
+    assert restarted == []
+    assert stream_audio.watchdog_poll(1) == 0
+    assert restarted == [True]
+
+
+def test_watchdog_poll_skips_when_paused_or_reconnecting(monkeypatch):
+    reset_state()
+    stream_audio.stream_active = True
+    stream_audio.is_paused = True
+    stream_audio.chromecast = mock.Mock()
+    stream_audio.chromecast.status.app_id = None
+    stream_audio.media_controller = FakeMediaController("IDLE")
+
+    restarted = []
+    monkeypatch.setattr(
+        stream_audio, "play_stream_on_chromecast", lambda: restarted.append(True)
+    )
+
+    assert stream_audio.watchdog_poll(1) == 0
+    assert restarted == []
+
+
+def test_watchdog_poll_skips_when_paused_on_device():
+    """Device-side pause (PAUSED state) must not be fought by the watchdog."""
+    reset_state()
+    stream_audio.stream_active = True
+    stream_audio.is_paused = False
+    stream_audio.chromecast = mock.Mock()
+    stream_audio.chromecast.status.app_id = "CC1AD845"
+    stream_audio.media_controller = FakeMediaController("PAUSED")
+
+    restarted = []
+    stream_audio.play_stream_on_chromecast = lambda: restarted.append(True)
+
+    assert stream_audio.watchdog_poll(1) == 0
+    assert restarted == []

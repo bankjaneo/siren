@@ -38,6 +38,7 @@ LOOP_DELAY = float(os.environ.get("LOOP_DELAY", "0.1"))
 DEFAULT_VOLUME = int(os.environ.get("DEFAULT_VOLUME", "5"))
 RECONNECT_DELAY = float(os.environ.get("RECONNECT_DELAY", "2"))
 RECONNECT_ATTEMPTS = int(os.environ.get("RECONNECT_ATTEMPTS", "60"))
+WATCHDOG_INTERVAL = float(os.environ.get("WATCHDOG_INTERVAL", "10"))
 
 # Global state variables (thread-safe)
 is_paused = True
@@ -514,6 +515,60 @@ def reconnect_loop() -> None:
         logger.info("Reconnect thread finished")
 
 
+def watchdog_poll(stalled: int) -> int:
+    """One watchdog poll. Returns the updated consecutive-stall count.
+
+    The reconnect listener only covers cast-socket drops. This watchdog covers
+    media-session failures (receiver app error, dead HTTP stream) where the
+    socket stays connected but audio stops.
+
+    Args:
+        stalled: Current consecutive-stall count
+
+    Returns:
+        int: Updated stall count (0 after a restart or healthy poll)
+    """
+    with lock:
+        active = (
+            stream_active
+            and not is_paused
+            and not connection_lost
+            and not reconnect_running
+        )
+    if not active or chromecast is None or media_controller is None:
+        return 0
+
+    try:
+        state = media_controller.status.player_state
+        app_id = chromecast.status.app_id
+    except Exception:
+        return 0
+
+    if state in ("PLAYING", "BUFFERING", "LOADING", "PAUSED") and app_id:
+        return 0
+
+    stalled += 1
+    if stalled < 2:
+        logger.debug(f"Playback state suspicious: {state}, app_id={app_id}")
+        return stalled
+
+    logger.warning(f"Playback stalled (player_state={state}), restarting stream")
+    play_stream_on_chromecast()
+    return 0
+
+
+def playback_watchdog() -> None:
+    """Periodically poll player state and restart the stream if it stalls.
+
+    Returns:
+        None
+    """
+    stalled = 0
+    while True:
+        time.sleep(WATCHDOG_INTERVAL)
+        stalled = watchdog_poll(stalled)
+
+
 def stream_audio(file_index: int) -> Generator[bytes, None, None]:
     """Stream MP3 files to Chromecast in a continuous loop
 
@@ -557,8 +612,9 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
                     # Small delay to prevent blocking
                     time.sleep(chunk_interval)
         except Exception as e:
+            # Skip to the next file instead of ending the stream
             logger.warning(f"Error streaming file: {current_file}: {e}")
-            break
+            time.sleep(1)
 
         # Move to next file, wrap around to 0 after last file
         idx = (idx + 1) % len(global_mp3_files)
@@ -956,6 +1012,9 @@ def config() -> dict[str, Any]:
 
 
 if __name__ == "__main__":
+    threading.Thread(
+        target=playback_watchdog, daemon=True, name="playback-watchdog"
+    ).start()
     print("Starting Google Cast Audio Streamer...")
     print(f"Place your MP3 files in '{MUSIC_FOLDER}' folder")
     lan_ip = get_lan_ip()
