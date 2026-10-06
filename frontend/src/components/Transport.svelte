@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Pause, Play, SkipBack, SkipForward } from "@lucide/svelte";
   import { command, isOk } from "../lib/api";
   import { player, refreshStatus } from "../lib/status.svelte";
   import { showError } from "../lib/toast.svelte";
@@ -40,7 +41,7 @@
     disabled={mode === "offline" || busy}
     onclick={() => act("/previous")}
   >
-    ⏮
+    <SkipBack size={22} />
   </button>
 
   <button
@@ -49,7 +50,11 @@
     disabled={mode === "offline" || busy}
     onclick={onToggle}
   >
-    {mode === "playing" ? "⏸" : "▶"}
+    {#if mode === "playing"}
+      <Pause size={30} />
+    {:else}
+      <Play size={30} />
+    {/if}
   </button>
 
   <button
@@ -58,7 +63,7 @@
     disabled={mode === "offline" || busy}
     onclick={() => act("/next")}
   >
-    ⏭
+    <SkipForward size={22} />
   </button>
 </div>
 
@@ -71,13 +76,14 @@
   }
 
   .skip {
+    display: grid;
+    place-items: center;
     width: 56px;
     height: 56px;
     border-radius: 50%;
     background: var(--surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
-    font-size: 20px;
     transition: transform 0.15s ease;
   }
 
@@ -86,12 +92,13 @@
   }
 
   .main {
+    display: grid;
+    place-items: center;
     width: 76px;
     height: 76px;
     border-radius: 50%;
     background: var(--accent);
     color: var(--accent-text);
-    font-size: 28px;
     box-shadow: var(--shadow);
     transition: transform 0.15s ease;
   }

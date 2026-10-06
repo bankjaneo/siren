@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { Siren } from "@lucide/svelte";
   import ConnectionBanner from "./components/ConnectionBanner.svelte";
   import DeviceList from "./components/DeviceList.svelte";
   import FileList from "./components/FileList.svelte";
@@ -17,7 +18,7 @@
 
 <div class="shell">
   <header>
-    <span class="brand">📣 Siren</span>
+    <span class="brand"><Siren size={22} strokeWidth={2.2} /> Siren</span>
     <ThemeToggle />
   </header>
 
@@ -75,9 +76,16 @@
   }
 
   .brand {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-size: 20px;
     font-weight: 800;
     letter-spacing: -0.01em;
+  }
+
+  .brand :global(svg) {
+    color: var(--accent);
   }
 
   main {

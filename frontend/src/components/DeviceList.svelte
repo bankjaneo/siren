@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Check, Speaker } from "@lucide/svelte";
   import { command, getDevices, isOk, type CastDevice } from "../lib/api";
   import { player, refreshStatus } from "../lib/status.svelte";
   import { showError } from "../lib/toast.svelte";
@@ -59,11 +60,12 @@
   {:else}
     {#each devices as device (device.name)}
       <div class="device">
+        <Speaker size={20} class="icon" aria-hidden="true" />
         <div class="info">
           <span class="name">
             {device.name}
             {#if player.data?.selected_device === device.name}
-              <span class="connected-badge">Connected</span>
+              <span class="connected-badge"><Check size={12} /> Connected</span>
             {/if}
           </span>
           <span class="model">{device.model}</span>
@@ -104,6 +106,11 @@
     border: 1px solid var(--border);
   }
 
+  .device :global(.icon) {
+    flex-shrink: 0;
+    color: var(--muted);
+  }
+
   .info {
     display: flex;
     flex-direction: column;
@@ -120,6 +127,9 @@
   }
 
   .connected-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     font-size: 11px;
     font-weight: 700;
     color: var(--ok);

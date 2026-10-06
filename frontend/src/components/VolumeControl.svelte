@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Volume1, Volume2, VolumeX } from "@lucide/svelte";
   import { command, isOk } from "../lib/api";
   import { player, refreshStatus } from "../lib/status.svelte";
   import { showError } from "../lib/toast.svelte";
@@ -40,7 +41,15 @@
 </script>
 
 <div class="volume">
-  <span class="icon" aria-hidden="true">🔊</span>
+  <span class="icon" aria-hidden="true">
+    {#if !player.data?.chromecast_connected}
+      <VolumeX size={18} />
+    {:else if volume < 50}
+      <Volume1 size={18} />
+    {:else}
+      <Volume2 size={18} />
+    {/if}
+  </span>
   <input
     type="range"
     min="1"
@@ -63,6 +72,12 @@
     border: 1px solid var(--border);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
+  }
+
+  .icon {
+    display: grid;
+    place-items: center;
+    color: var(--muted);
   }
 
   input[type="range"] {

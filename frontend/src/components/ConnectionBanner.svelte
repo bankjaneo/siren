@@ -1,10 +1,11 @@
 <script lang="ts">
+  import { LoaderCircle } from "@lucide/svelte";
   import { player } from "../lib/status.svelte";
 </script>
 
 {#if player.data?.connection_lost}
   <div class="banner" role="status">
-    <span class="spinner" aria-hidden="true"></span>
+    <LoaderCircle class="spinner" size={16} aria-hidden="true" />
     Reconnecting to speaker…
   </div>
 {/if}
@@ -23,12 +24,7 @@
     font-size: 14px;
   }
 
-  .spinner {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    border: 2px solid var(--warn);
-    border-top-color: transparent;
+  .banner :global(.spinner) {
     animation: spin 0.8s linear infinite;
   }
 

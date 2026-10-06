@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { Play } from "@lucide/svelte";
   import { command, getFiles, isOk } from "../lib/api";
   import { player, refreshStatus } from "../lib/status.svelte";
   import { showError } from "../lib/toast.svelte";
@@ -59,7 +60,7 @@
         {#if jumping === index}
           <span class="jumping">…</span>
         {:else if player.data?.stream_active && player.data?.current_file_index === index}
-          <span class="marker" aria-hidden="true">▸</span>
+          <span class="marker" aria-hidden="true"><Play size={14} /></span>
         {/if}
       </button>
     {/each}
@@ -119,8 +120,9 @@
   }
 
   .marker {
+    display: grid;
+    place-items: center;
     color: var(--accent);
-    font-weight: 700;
   }
 
   .jumping {

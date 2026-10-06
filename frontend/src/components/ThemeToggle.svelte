@@ -1,11 +1,6 @@
 <script lang="ts">
+  import { Moon, Sun, Monitor } from "@lucide/svelte";
   import { cycleTheme, theme, type Theme } from "../lib/theme.svelte";
-
-  const icons: Record<Theme, string> = {
-    system: "🖥️",
-    light: "☀️",
-    dark: "🌙",
-  };
 
   const labels: Record<Theme, string> = {
     system: "System theme",
@@ -20,7 +15,13 @@
   title={labels[theme.current]}
   aria-label={labels[theme.current]}
 >
-  {icons[theme.current]}
+  {#if theme.current === "system"}
+    <Monitor size={18} />
+  {:else if theme.current === "light"}
+    <Sun size={18} />
+  {:else}
+    <Moon size={18} />
+  {/if}
 </button>
 
 <style>
@@ -33,11 +34,12 @@
     background: var(--surface);
     border: 1px solid var(--border);
     box-shadow: var(--shadow);
-    font-size: 16px;
+    color: var(--muted);
     transition: transform 0.15s ease;
   }
 
   .theme-toggle:hover {
     transform: scale(1.06);
+    color: var(--text);
   }
 </style>

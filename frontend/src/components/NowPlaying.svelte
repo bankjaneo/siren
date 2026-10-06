@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { AudioLines, Radio } from "@lucide/svelte";
   import { player } from "../lib/status.svelte";
   import Progress from "./Progress.svelte";
 
@@ -25,7 +26,7 @@
 </script>
 
 <section class="hero">
-  <div class="art" aria-hidden="true">🎵</div>
+  <div class="art" aria-hidden="true"><AudioLines size={40} /></div>
   <p class="now-label">Now Streaming</p>
   <h1 class="track">{trackLabel(player.data?.current_file ?? null)}</h1>
   <div class="meta">
@@ -33,7 +34,7 @@
       {stateLabel}
     </span>
     {#if player.data?.selected_device}
-      <span class="device">📡 {player.data.selected_device}</span>
+      <span class="device"><Radio size={14} /> {player.data.selected_device}</span>
     {/if}
   </div>
   <Progress />
@@ -59,8 +60,8 @@
     width: 96px;
     height: 96px;
     border-radius: 50%;
-    font-size: 40px;
     background: var(--accent-soft);
+    color: var(--accent);
     margin-bottom: 8px;
   }
 
@@ -110,6 +111,9 @@
   }
 
   .device {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
     font-size: 13px;
     color: var(--muted);
   }
