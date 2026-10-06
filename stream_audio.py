@@ -27,7 +27,12 @@ logger = logging.getLogger(__name__)
 # Suppress Flask development server warning
 logging.getLogger("werkzeug").setLevel(logging.INFO)
 
-app = Flask(__name__)
+app = Flask(
+    __name__,
+    static_folder=os.path.join("frontend", "dist", "assets"),
+    static_url_path="/assets",
+    template_folder=os.path.join("frontend", "dist"),
+)
 CORS(app)
 
 # Environment configuration
@@ -648,6 +653,12 @@ def index() -> str:
     Returns:
         str: Rendered HTML template
     """
+    if not os.path.exists(os.path.join("frontend", "dist", "index.html")):
+        return (
+            "<h1>Siren UI not built</h1>"
+            "<p>Run <code>cd frontend &amp;&amp; npm install &amp;&amp; npm run build</code> "
+            "or <code>docker compose build</code> to build the web interface.</p>"
+        )
     return render_template("index.html")
 
 
@@ -720,6 +731,40 @@ def play(device_name: str | None = None) -> dict[str, Any]:
 
     logger.error(f"Timeout waiting for playback to start (waited {timeout}s)")
     return {"status": "failed", "message": "Timeout waiting for playback to start"}
+
+
+@app.route("/play-file/<int:index>")
+@require_chromecast_connected
+@require_mp3_files
+def play_file(index: int) -> dict[str, Any]:
+    """Jump playback to the file at the given playlist index
+
+    Args:
+        index: Zero-based index into the sorted MP3 file list
+
+    Returns:
+        Dict: Status and file index
+    """
+    global is_paused, current_file_index, stream_active, connection_lost
+
+    mp3_files_list = get_mp3_files()
+    if index < 0 or index >= len(mp3_files_list):
+        logger.warning(f"Invalid file index requested: {index}")
+        return {"status": "failed", "message": "Invalid file index"}
+
+    with lock:
+        is_paused = False
+        current_file_index = index
+        stream_active = True
+        connection_lost = False
+
+    # Restart playback so the Chromecast re-fetches /stream from the new index
+    stop_media_controller()
+    time.sleep(0.5)
+    if not play_stream_on_chromecast():
+        return {"status": "failed", "message": "Could not start playback"}
+
+    return {"status": "success", "file_index": index}
 
 
 @app.route("/pause")
@@ -821,6 +866,8 @@ def status() -> dict[str, Any]:
     mp3_files_list = get_mp3_files()
     return {
         "is_paused": is_paused,
+        "stream_active": stream_active,
+        "connection_lost": connection_lost,
         "files_count": len(mp3_files_list),
         "chromecast_connected": chromecast is not None,
         "selected_device": chromecast.cast_info.friendly_name if chromecast else None,
@@ -1023,6 +1070,7 @@ if __name__ == "__main__":
     print("  / - Web interface")
     print("  /play - Start playback")
     print("  /play/:device_name - Start playback on specific device")
+    print("  /play-file/:index - Jump playback to file at index")
     print("  /pause - Pause playback")
     print("  /resume - Resume playback")
     print("  /stop - Stop playback")

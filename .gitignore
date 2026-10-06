@@ -46,6 +46,10 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Frontend
+node_modules/
+frontend/dist/
+
 # Project specific
 music/*.mp3
 music/*.wav

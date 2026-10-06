@@ -1,3 +1,15 @@
+# --- Stage 1: build the web UI ---
+FROM node:22-alpine AS ui
+
+WORKDIR /ui
+
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+
+COPY frontend/ ./
+RUN npm run build
+
+# --- Stage 2: Python runtime ---
 FROM python:3.11-alpine
 
 WORKDIR /app
@@ -10,7 +22,7 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev \
 # Copy application files (music folder is mounted as volume)
 COPY stream_audio.py .
 COPY favicon.png .
-COPY templates/ templates/
+COPY --from=ui /ui/dist frontend/dist
 
 # Create empty music directory for volume mount
 RUN mkdir -p music

@@ -1,6 +1,6 @@
-# Google Nest Mini Audio Streamer
+# Siren
 
-A Python service that continuously streams MP3 files from a folder to your Chromecast device using direct Chromecast control.
+A Python service that continuously streams MP3 files from a folder to your Chromecast device using direct Chromecast control, with a modern web UI (Svelte) supporting system/light/dark theme and desktop/mobile layouts.
 
 ## Setup
 
@@ -25,7 +25,17 @@ chmod +x start.sh
 ./start.sh
 ```
 
+`start.sh` builds the web UI automatically on first run (requires Node.js). To work on the UI with hot reload:
+
+```bash
+cd frontend
+npm install
+npm run dev   # proxies API calls to the Flask server on :5067
+```
+
 ### Docker
+
+The Dockerfile uses a multi-stage build: a Node stage builds the web UI, then the Python stage serves it.
 
 1. Build the Docker image:
 ```bash
@@ -70,6 +80,7 @@ Navigate to `http://localhost:5067` in your browser for the web UI.
 |----------|-------------|---------|
 | `GET /play` | Start streaming to default device (auto-selects Google Nest Mini) | `curl http://localhost:5067/play` |
 | `GET /play/DeviceName` | Start streaming to specific Chromecast device | `curl http://localhost:5067/play/Google%20Nest%20Mini` |
+| `GET /play-file/{index}` | Jump playback to the file at the given zero-based index | `curl http://localhost:5067/play-file/2` |
 | `GET /pause` | Stop streaming and pause playback | `curl http://localhost:5067/pause` |
 | `GET /resume` | Resume playback from paused state | `curl http://localhost:5067/resume` |
 | `GET /stop` | Stop the audio stream | `curl http://localhost:5067/stop` |

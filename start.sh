@@ -1,5 +1,20 @@
 #!/bin/bash
 
+# Build the web UI if it hasn't been built yet (requires Node.js/npm)
+if [ ! -f "frontend/dist/index.html" ]; then
+    if command -v npm >/dev/null 2>&1; then
+        echo "Building web UI..."
+        (cd frontend && npm install && npm run build) || {
+            echo "Failed to build web UI"
+            exit 1
+        }
+    else
+        echo "Web UI is not built and npm is not available."
+        echo "Install Node.js, then run: cd frontend && npm install && npm run build"
+        exit 1
+    fi
+fi
+
 # Activate virtual environment
 source venv/bin/activate
 
