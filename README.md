@@ -37,6 +37,14 @@ npm run dev   # proxies API calls to the Flask server on :5067
 
 The Dockerfile uses a multi-stage build: a Node stage builds the web UI, then the Python stage serves it.
 
+Prebuilt images are published to GitHub Container Registry on every release (multi-arch: amd64/arm64):
+
+```bash
+docker pull ghcr.io/bankjaneo/siren:latest
+```
+
+Or build it yourself:
+
 1. Build the Docker image:
 ```bash
 docker build -t siren-stream .
@@ -138,7 +146,7 @@ environment:
 
 ### Local Configuration
 
-For local development, edit `stream_audio.py` directly:
+For local development, edit `stream_audio.py` directly.
 
 ## Notes
 
