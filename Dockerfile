@@ -16,7 +16,7 @@ WORKDIR /app
 
 # Install build dependencies, Python packages, then clean up
 RUN apk add --no-cache --virtual .build-deps gcc musl-dev \
-    && pip install --no-cache-dir flask==3.0.0 flask-cors==4.0.0 pychromecast==14.0.9 zeroconf==0.135.0 \
+    && pip install --no-cache-dir flask==3.0.0 flask-cors==4.0.0 mutagen==1.47.0 pychromecast==14.0.9 zeroconf==0.135.0 \
     && apk del .build-deps
 
 # Copy application files (music folder is mounted as volume)

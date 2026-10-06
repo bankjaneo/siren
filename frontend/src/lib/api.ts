@@ -10,6 +10,10 @@ export interface PlayerStatus {
   current_file_index: number;
   current_file: string | null;
   current_volume: number;
+  /** Seconds into the current file, when playing; null when unknown. */
+  stream_position: number | null;
+  /** Duration of the current file in seconds, when streaming. */
+  stream_duration: number | null;
 }
 
 export interface CastDevice {

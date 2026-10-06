@@ -57,6 +57,53 @@ connection_lost = False
 reconnect_running = False
 target_device_name = DEFAULT_DEVICE
 
+# Progress tracking for the /stream session (written by the stream generator,
+# read by /status). stream_file_elapsed is the offset of the current file
+# within the Chromecast's media timeline; stream_file_position is bytes sent
+# of the current file (used as a fallback when no cast status is available).
+stream_file_elapsed = 0.0
+stream_file_position = 0
+stream_file_size = 0
+stream_file_duration: float | None = None
+
+try:
+    from mutagen.mp3 import MP3
+except ImportError:
+    MP3 = None
+
+# Cache of parsed MP3 durations, keyed by file path
+_duration_cache: dict[str, float] = {}
+
+
+def get_duration(path: str) -> float:
+    """Get the duration of an MP3 file in seconds
+
+    Uses mutagen when available; otherwise estimates from file size assuming
+    a typical 128 kbps bitrate. Results are cached per path.
+
+    Args:
+        path: Path to the MP3 file
+
+    Returns:
+        float: Duration in seconds
+    """
+    if path in _duration_cache:
+        return _duration_cache[path]
+
+    duration: float | None = None
+    if MP3 is not None:
+        try:
+            duration = float(MP3(path).info.length)
+        except Exception as e:
+            logger.warning(f"Could not parse duration of {path}: {e}")
+
+    if duration is None:
+        # Typical MP3 bitrate: 128kbps = 16KB/s
+        duration = os.path.getsize(path) / 16000.0
+
+    _duration_cache[path] = duration
+    return duration
+
 
 class ConnectionListener:
     """Listener for Chromecast socket connection status changes.
@@ -584,6 +631,11 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
         bytes: Audio data chunks
     """
     global current_file_index, stream_active
+    global \
+        stream_file_elapsed, \
+        stream_file_position, \
+        stream_file_size, \
+        stream_file_duration
     global_mp3_files = get_mp3_files()
 
     if not global_mp3_files:
@@ -600,11 +652,19 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
 
     # Start from the given index and loop continuously
     idx = file_index
+    # Offset of the current file in the Chromecast's media timeline. The cast
+    # sees /stream as one continuous media item, so currentTime keeps counting
+    # across file boundaries; this tracks where each file begins.
+    session_elapsed = 0.0
 
     while stream_active:
         current_file = global_mp3_files[idx]
         logger.info(f"Streaming file: {current_file}")
         current_file_index = idx
+        stream_file_elapsed = session_elapsed
+        stream_file_position = 0
+        stream_file_size = os.path.getsize(current_file)
+        stream_file_duration = get_duration(current_file)
 
         # Stream the file
         try:
@@ -614,12 +674,15 @@ def stream_audio(file_index: int) -> Generator[bytes, None, None]:
                     if not data:
                         break
                     yield data
+                    stream_file_position = f.tell()
                     # Small delay to prevent blocking
                     time.sleep(chunk_interval)
         except Exception as e:
             # Skip to the next file instead of ending the stream
             logger.warning(f"Error streaming file: {current_file}: {e}")
             time.sleep(1)
+
+        session_elapsed += stream_file_duration or 0.0
 
         # Move to next file, wrap around to 0 after last file
         idx = (idx + 1) % len(global_mp3_files)
@@ -864,6 +927,26 @@ def status() -> dict[str, Any]:
     """
     global current_file_index
     mp3_files_list = get_mp3_files()
+
+    position = None
+    if chromecast and media_controller and stream_active:
+        try:
+            # Ask the cast for a fresh status; the response arrives
+            # asynchronously and is picked up by the next poll.
+            media_controller.update_status()
+            current_time = media_controller.status.adjusted_current_time
+            if current_time is not None:
+                position = current_time - stream_file_elapsed
+        except Exception:
+            pass
+
+    if position is None and stream_file_size > 0 and stream_file_duration:
+        # Fallback: fraction of bytes streamed into the current file.
+        position = (stream_file_position / stream_file_size) * stream_file_duration
+
+    if position is not None and stream_file_duration:
+        position = max(0.0, min(position, stream_file_duration))
+
     return {
         "is_paused": is_paused,
         "stream_active": stream_active,
@@ -874,6 +957,8 @@ def status() -> dict[str, Any]:
         "current_file_index": current_file_index,
         "current_file": mp3_files_list[current_file_index] if mp3_files_list else None,
         "current_volume": current_volume,
+        "stream_position": position,
+        "stream_duration": stream_file_duration if stream_active else None,
     }
 
 

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { player } from "../lib/status.svelte";
+  import Progress from "./Progress.svelte";
 
   /** Strip folder prefix and extension for display. */
   function trackLabel(file: string | null): string {
@@ -35,6 +36,7 @@
       <span class="device">📡 {player.data.selected_device}</span>
     {/if}
   </div>
+  <Progress />
 </section>
 
 <style>
