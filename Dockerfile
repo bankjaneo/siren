@@ -29,4 +29,4 @@ RUN mkdir -p music
 
 EXPOSE 5067
 
-CMD ["sh", "-c", "export MUSIC_FOLDER=$MUSIC_FOLDER && export DEFAULT_DEVICE=$DEFAULT_DEVICE && export PORT=$PORT && export LOOP_DELAY=$LOOP_DELAY && export DEFAULT_VOLUME=$DEFAULT_VOLUME && python stream_audio.py"]
+CMD ["sh", "-c", "export MUSIC_FOLDER=${MUSIC_FOLDER:-music/} && export DEFAULT_DEVICE=${DEFAULT_DEVICE:-Google Nest Mini} && export PORT=${PORT:-5067} && export LOOP_DELAY=${LOOP_DELAY:-0.1} && export DEFAULT_VOLUME=${DEFAULT_VOLUME:-5} && python stream_audio.py"]
