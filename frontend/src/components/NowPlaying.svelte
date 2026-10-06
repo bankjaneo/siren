@@ -1,6 +1,6 @@
 <script lang="ts">
   import { AudioLines, Radio } from "@lucide/svelte";
-  import { player } from "../lib/status.svelte";
+  import { playbackState, player } from "../lib/status.svelte";
   import Progress from "./Progress.svelte";
 
   /** Strip folder prefix and extension for display. */
@@ -11,12 +11,7 @@
   }
 
   // stopped | paused | playing | offline
-  let state = $derived.by(() => {
-    const s = player.data;
-    if (!s || !s.chromecast_connected) return "offline";
-    if (!s.stream_active) return "stopped";
-    return s.is_paused ? "paused" : "playing";
-  });
+  let state = $derived(playbackState(player.data));
 
   let stateLabel = $derived(
     { offline: "Not connected", stopped: "Stopped", paused: "Paused", playing: "Playing" }[

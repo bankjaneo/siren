@@ -44,6 +44,32 @@ def reset_state():
     stream_audio.current_file_index = 0
 
 
+def setup_reconnecting(monkeypatch, attempts: int) -> None:
+    """Set up state and time mocks for a reconnect_loop test.
+
+    Puts the module in the "connection lost, reconnect running" state and
+    replaces threading sleeps with no-ops so reconnect_loop runs instantly.
+
+    Args:
+        monkeypatch: pytest monkeypatch fixture
+        attempts: RECONNECT_ATTEMPTS value to use
+    """
+    stream_audio.stream_active = True
+    stream_audio.is_paused = False
+    stream_audio.connection_lost = True
+    stream_audio.reconnect_running = True
+    monkeypatch.setattr(stream_audio, "RECONNECT_ATTEMPTS", attempts)
+    monkeypatch.setattr(stream_audio, "RECONNECT_DELAY", 0)
+    monkeypatch.setattr(
+        stream_audio,
+        "time",
+        types.SimpleNamespace(
+            sleep=lambda _: None,
+            time=lambda: 0,
+        ),
+    )
+
+
 def test_listener_triggers_reconnect_while_playing(monkeypatch):
     reset_state()
     stream_audio.stream_active = True
@@ -130,25 +156,12 @@ def test_start_reconnect_spawns_single_thread(monkeypatch):
 
 def test_reconnect_loop_resumes_playback(monkeypatch):
     reset_state()
-    stream_audio.stream_active = True
-    stream_audio.is_paused = False
-    stream_audio.connection_lost = True
-    stream_audio.reconnect_running = True
+    setup_reconnecting(monkeypatch, attempts=5)
     stream_audio.chromecast = mock.Mock()
     stream_audio.media_controller = FakeMediaController("PLAYING")
     stream_audio.current_file_index = 3
 
     calls = []
-    monkeypatch.setattr(stream_audio, "RECONNECT_ATTEMPTS", 5)
-    monkeypatch.setattr(stream_audio, "RECONNECT_DELAY", 0)
-    monkeypatch.setattr(
-        stream_audio,
-        "time",
-        types.SimpleNamespace(
-            sleep=lambda _: None,
-            time=lambda: 0,
-        ),
-    )
     monkeypatch.setattr(
         stream_audio,
         "find_chromecast",
@@ -199,22 +212,9 @@ def test_reconnect_loop_cancelled_on_stop(monkeypatch):
 
 def test_reconnect_loop_cancelled_when_paused_during_find(monkeypatch):
     reset_state()
-    stream_audio.stream_active = True
-    stream_audio.is_paused = False
-    stream_audio.connection_lost = True
-    stream_audio.reconnect_running = True
+    setup_reconnecting(monkeypatch, attempts=5)
 
     played = []
-    monkeypatch.setattr(stream_audio, "RECONNECT_ATTEMPTS", 5)
-    monkeypatch.setattr(stream_audio, "RECONNECT_DELAY", 0)
-    monkeypatch.setattr(
-        stream_audio,
-        "time",
-        types.SimpleNamespace(
-            sleep=lambda _: None,
-            time=lambda: 0,
-        ),
-    )
 
     def fake_find(device):
         stream_audio.is_paused = True
@@ -230,47 +230,11 @@ def test_reconnect_loop_cancelled_when_paused_during_find(monkeypatch):
     assert played == []
     assert stream_audio.connection_lost is False
     assert stream_audio.reconnect_running is False
-    reset_state()
-    stream_audio.stream_active = True
-    stream_audio.is_paused = False
-    stream_audio.connection_lost = True
-    stream_audio.reconnect_running = True
-
-    monkeypatch.setattr(stream_audio, "RECONNECT_ATTEMPTS", 3)
-    monkeypatch.setattr(stream_audio, "RECONNECT_DELAY", 0)
-    monkeypatch.setattr(
-        stream_audio,
-        "time",
-        types.SimpleNamespace(
-            sleep=lambda _: None,
-            time=lambda: 0,
-        ),
-    )
-    monkeypatch.setattr(stream_audio, "find_chromecast", lambda d: False)
-
-    stream_audio.reconnect_loop()
-
-    assert stream_audio.connection_lost is False
-    assert stream_audio.reconnect_running is False
 
 
 def test_reconnect_loop_gives_up_after_attempts(monkeypatch):
     reset_state()
-    stream_audio.stream_active = True
-    stream_audio.is_paused = False
-    stream_audio.connection_lost = True
-    stream_audio.reconnect_running = True
-
-    monkeypatch.setattr(stream_audio, "RECONNECT_ATTEMPTS", 3)
-    monkeypatch.setattr(stream_audio, "RECONNECT_DELAY", 0)
-    monkeypatch.setattr(
-        stream_audio,
-        "time",
-        types.SimpleNamespace(
-            sleep=lambda _: None,
-            time=lambda: 0,
-        ),
-    )
+    setup_reconnecting(monkeypatch, attempts=3)
     monkeypatch.setattr(stream_audio, "find_chromecast", lambda d: False)
 
     stream_audio.reconnect_loop()

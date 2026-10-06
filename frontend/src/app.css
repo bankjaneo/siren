@@ -1,7 +1,7 @@
 /*
- * Design tokens. Light is the default; dark applies when the user picks
- * "dark" explicitly ([data-theme="dark"]) or when the OS prefers dark and
- * the user has not pinned "light" ("system" leaves data-theme unset).
+ * Design tokens. Light is the default; the theme module resolves the
+ * "system" preference in JS and always sets data-theme="light|dark"
+ * on <html> before first paint, so dark tokens live in one block.
  */
 :root {
   --bg: #f4f1ec;
@@ -36,24 +36,6 @@
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) {
-    --bg: #141210;
-    --surface: #1f1c19;
-    --surface-soft: #262220;
-    --border: #37322d;
-    --text: #f0ece7;
-    --muted: #a39c93;
-    --accent: #ff7a45;
-    --accent-soft: rgba(255, 122, 69, 0.16);
-    --accent-text: #1a1006;
-    --ok: #51cf66;
-    --warn: #ffa94d;
-    --danger: #ff6b6b;
-    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.35);
-  }
-}
-
 * {
   margin: 0;
   padding: 0;
@@ -66,12 +48,6 @@ html {
 
 html[data-theme="dark"] {
   color-scheme: dark;
-}
-
-@media (prefers-color-scheme: dark) {
-  html:not([data-theme]) {
-    color-scheme: dark;
-  }
 }
 
 body {

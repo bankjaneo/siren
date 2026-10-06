@@ -7,11 +7,13 @@
     <meta name="theme-color" content="#141210" />
     <title>Siren</title>
     <script>
-      // Apply stored theme before first paint to avoid a flash.
-      const theme = localStorage.getItem("siren-theme") ?? "system";
-      if (theme === "light" || theme === "dark") {
-        document.documentElement.dataset.theme = theme;
-      }
+      // Apply resolved theme before first paint to avoid a flash.
+      // "system" (or anything unrecognized) follows prefers-color-scheme.
+      const stored = localStorage.getItem("siren-theme");
+      document.documentElement.dataset.theme =
+        stored === "dark" || (stored !== "light" && matchMedia("(prefers-color-scheme: dark)").matches)
+          ? "dark"
+          : "light";
     </script>
   </head>
   <body>

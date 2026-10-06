@@ -8,13 +8,22 @@ export const theme = $state<{ current: Theme }>({
   current: (localStorage.getItem(STORAGE_KEY) as Theme | null) ?? "system",
 });
 
-function apply(value: Theme): void {
-  if (value === "system") {
-    delete document.documentElement.dataset.theme;
-  } else {
-    document.documentElement.dataset.theme = value;
-  }
+const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
+
+/** Resolve a preference to a concrete theme ("system" follows the OS). */
+function resolve(value: Theme): "light" | "dark" {
+  if (value !== "system") return value;
+  return prefersDark.matches ? "dark" : "light";
 }
+
+function apply(value: Theme): void {
+  document.documentElement.dataset.theme = resolve(value);
+}
+
+// Follow OS theme changes while on the "system" preference.
+prefersDark.addEventListener("change", () => {
+  if (theme.current === "system") apply("system");
+});
 
 /** Advance system → light → dark → system. */
 export function cycleTheme(): void {

@@ -1,18 +1,13 @@
 <script lang="ts">
   import { Pause, Play, SkipBack, SkipForward } from "@lucide/svelte";
   import { command, isOk } from "../lib/api";
-  import { player, refreshStatus } from "../lib/status.svelte";
+  import { playbackState, player, refreshStatus } from "../lib/status.svelte";
   import { showError } from "../lib/toast.svelte";
 
   let busy = $state(false);
 
   // stopped → /play, paused → /resume, playing → /pause
-  let mode = $derived.by(() => {
-    const s = player.data;
-    if (!s || !s.chromecast_connected) return "offline";
-    if (!s.stream_active) return "stopped";
-    return s.is_paused ? "paused" : "playing";
-  });
+  let mode = $derived(playbackState(player.data));
 
   async function act(endpoint: string): Promise<void> {
     busy = true;

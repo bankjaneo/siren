@@ -7,6 +7,15 @@ export const player = $state<{ data: PlayerStatus | null; error: string | null }
   error: null,
 });
 
+export type PlaybackState = "offline" | "stopped" | "paused" | "playing";
+
+/** Derive the playback state from a status payload. */
+export function playbackState(s: PlayerStatus | null): PlaybackState {
+  if (!s || !s.chromecast_connected) return "offline";
+  if (!s.stream_active) return "stopped";
+  return s.is_paused ? "paused" : "playing";
+}
+
 let timer: ReturnType<typeof setInterval> | undefined;
 
 /** Fetch /status once and update the shared store. */
