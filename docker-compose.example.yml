@@ -1,8 +1,16 @@
 services:
   siren-stream:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # Pull the pre-built image from GitHub Container Registry (default).
+    # Available tags: https://github.com/bankjaneo/siren/pkgs/container/siren
+    image: ghcr.io/bankjaneo/siren:latest
+
+    # To build the image locally instead, comment out the "image" line above
+    # and uncomment the "build" section below, then run:
+    #   docker-compose up --build
+    # build:
+    #   context: .
+    #   dockerfile: Dockerfile
+
     container_name: siren-stream
     network_mode: host
     volumes:

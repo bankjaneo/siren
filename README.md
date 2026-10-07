@@ -55,14 +55,17 @@ docker build -t siren-stream .
 docker run --network=host -v $(pwd)/music:/app/music siren-stream
 ```
 
-3. Or use docker-compose:
+3. Or use docker-compose with the pre-built image (copy the example first):
 ```bash
-docker-compose up --build
+cp docker-compose.example.yml docker-compose.yml
+docker-compose up -d
 ```
+
+To build the image locally instead, comment out the `image` line in `docker-compose.yml`, uncomment the `build` section, then run `docker-compose up --build`.
 
 4. Override configuration via environment variables:
 ```bash
-docker-compose --env-file .env up --build
+docker-compose --env-file .env up -d
 ```
 
 Create a `.env` file for custom configuration:
@@ -105,7 +108,7 @@ Navigate to `http://localhost:5067` in your browser for the web UI.
 
 ### Play on Chromecast
 
-1. Start the server: `./start.sh` or `docker-compose up -d`
+1. Start the server: `./start.sh` or `docker-compose up -d` (see [Docker](#docker) for setup)
 2. List available devices: `curl http://localhost:5067/devices`
 3. Navigate to `http://localhost:5067` in your browser
 4. Use `/play` to start the continuous loop (auto-selects Google Nest Mini)
@@ -133,7 +136,7 @@ The following variables can be customized via environment variables or in `strea
 
 ### Docker Configuration
 
-For Docker deployments, you can override these values in `docker-compose.yml` or via `.env` file:
+For Docker deployments, you can override these values in your `docker-compose.yml` (copied from `docker-compose.example.yml`) or via `.env` file:
 
 ```yaml
 environment:
